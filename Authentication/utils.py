@@ -44,17 +44,17 @@ def send_verification_email(user, request=None):
     token = generate_verification_token(user)
     verification_url = f"http://127.0.0.1:8000/api/auth/verify-email/?token={token}"
 
-    subject = "Verify Your Email - CountyConnect"
+    subject = "Verify Your Email - E-Mwananchi"
     context = {
         "user": user,
         "verification_url": verification_url,
         "current_year": timezone.now().year,
     }
 
-    html_message = render_to_string("authentication/email_verification.html", context)
+    html_message = render_to_string("Authentication/email_verification.html", context)
     plain_message = strip_tags(html_message)
 
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@countyconnect.ke")
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "e.mwananchi254@gmail.com")
     recipient_list = [user.email]
 
     send_mail(subject, plain_message, from_email, recipient_list, html_message=html_message)
@@ -102,7 +102,7 @@ def send_password_reset_email(user):
         "current_year": timezone.now().year,
     }
 
-    html_message = render_to_string("authentication/password_reset_email.html", context)
+    html_message = render_to_string("Authentication/password_reset_email.html", context)
     plain_message = strip_tags(html_message)
 
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "e.mwananchi254@gmail.com")

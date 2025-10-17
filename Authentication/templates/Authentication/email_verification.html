@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Reset Password</title>
+    <title>Email Verification</title>
     <style>
       body {
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -60,22 +60,22 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>CountyConnect – Reset Your Password</h1>
+        <h1>E-Mwananchi – Verify Your Email</h1>
       </div>
       <div class="content">
         <p>Hello {{ user.get_full_name|default:user.email }},</p>
 
         <p>
-          We received a request to reset your password for your
-          <strong>CountyConnect</strong> account.
+          Thank you for signing up with <strong>E-Mwananchi</strong>.<br />
+          Please confirm your email address by clicking the button below:
         </p>
 
         <p style="text-align: center;">
-          <a href="{{ reset_url }}" class="button">Reset Password</a>
+          <a href="{{ verification_url }}" class="button">Verify Email</a>
         </p>
 
         <p>
-          This link will expire in 30 Minutes. If you didn’t request this reset,
+          This link will expire in 30 Minutes. If you didn’t create this account,
           you can safely ignore this email.
         </p>
 
