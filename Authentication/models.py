@@ -54,7 +54,7 @@ class UserManager(BaseUserManager):
         return self._create_user(email, password, **extra_fields)
 
 
-class User(AbstractBaseUser, PermissionsMixin):
+class CustomUser(AbstractBaseUser, PermissionsMixin):
     """Custom User model.
 
     - Uses email as the unique identifier for authentication
