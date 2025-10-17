@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Verification</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f9fafb;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 600px;
+        margin: 40px auto;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        overflow: hidden;
+      }
+      .header {
+        background: #0369a1;
+        color: #ffffff;
+        text-align: center;
+        padding: 25px;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      .content {
+        padding: 30px;
+        color: #111827;
+      }
+      .content p {
+        font-size: 16px;
+        line-height: 1.5;
+        margin-bottom: 20px;
+      }
+      .button {
+        display: inline-block;
+        background: #0369a1;
+        color: #ffffff !important;
+        text-decoration: none;
+        padding: 12px 22px;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 16px;
+      }
+      .footer {
+        text-align: center;
+        padding: 20px;
+        font-size: 13px;
+        color: #6b7280;
+        border-top: 1px solid #e5e7eb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>CountyConnect – Verify Your Email</h1>
+      </div>
+      <div class="content">
+        <p>Hello {{ user.get_full_name|default:user.email }},</p>
+
+        <p>
+          Thank you for signing up with <strong>CountyConnect</strong>.<br />
+          Please confirm your email address by clicking the button below:
+        </p>
+
+        <p style="text-align: center;">
+          <a href="{{ verification_url }}" class="button">Verify Email</a>
+        </p>
+
+        <p>
+          This link will expire in 24 hours. If you didn’t create this account,
+          you can safely ignore this email.
+        </p>
+
+        <p>Thank you,<br />The CountyConnect Team</p>
+      </div>
+      <div class="footer">
+        &copy; {{ current_year }} CountyConnect. All rights reserved.
+      </div>
+    </div>
+  </body>
+</html>
