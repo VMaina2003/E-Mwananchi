@@ -82,3 +82,17 @@ department = models.ForeignKey(
         related_name="reports",
         help_text="County department responsible for this issue (auto-detected by AI)."
     )
+
+   # --- AI Verification ---
+verified_by_ai = models.BooleanField(
+        default=False,
+        help_text="True if the AI verified this report automatically."
+    )
+ai_confidence = models.FloatField(
+        null=True, blank=True,
+        help_text="Confidence score from AI model (0.0–1.0)."
+    )
+image_required_passed = models.BooleanField(
+        default=False,
+        help_text="True if required image evidence was provided."
+    )
