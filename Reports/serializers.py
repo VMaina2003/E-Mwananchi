@@ -79,3 +79,63 @@ class ReportSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        
+ # --------------------------------------------------------
+    #   VALIDATION LOGIC
+    # --------------------------------------------------------
+    def validate(self, data):
+        """Check for required fields and consistency before creation."""
+        if not data.get("title"):
+            raise serializers.ValidationError("A report must have a title.")
+        if not data.get("description"):
+            raise serializers.ValidationError("Please provide a detailed description.")
+        if not data.get("county"):
+            raise serializers.ValidationError("County is required.")
+        return data
+
+    def create(self, validated_data):
+        """
+        Custom create method:
+        - Attaches the reporter and role.
+        - Handles image uploads.
+        - Performs simple validation for 'image_required_passed'.
+        """
+        request = self.context.get("request")
+        user = request.user if request else None
+
+        # Extract images if provided
+        new_images = validated_data.pop("new_images", [])
+
+        # Attach reporter info
+        report = Report.objects.create(
+            reporter=user,
+            role_at_submission=user.role,
+            **validated_data
+        )
+
+        # Handle image uploads
+        if new_images:
+            for image_file in new_images:
+                ReportImage.objects.create(report=report, image=image_file)
+            report.image_required_passed = True
+            report.save(update_fields=["image_required_passed"])
+
+        return report
+
+    def update(self, instance, validated_data):
+        """
+        Custom update method:
+        - Restricts editing based on status.
+        - Updates only allowed fields.
+        """
+        if not instance.is_editable_by_reporter():
+            raise serializers.ValidationError("You cannot edit this report after verification.")
+
+        allowed_fields = ["title", "description", "county", "subcounty", "ward"]
+        for field, value in validated_data.items():
+            if field in allowed_fields:
+                setattr(instance, field, value)
+
+        instance.updated_at = timezone.now()
+        instance.save()
+        return instance
