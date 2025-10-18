@@ -19,3 +19,14 @@ class SubCountySerializer(serializers.ModelSerializer):
     class Meta:
         model = SubCounty
         fields = ["id", "name", "code", "county"]
+        
+
+# ============================================================
+#   WARD SERIALIZER
+# ============================================================
+class WardSerializer(serializers.ModelSerializer):
+    subcounty = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = Ward
+        fields = ["id", "name", "latitude", "longitude", "subcounty"]
