@@ -33,3 +33,32 @@ class DepartmentAdmin(admin.ModelAdmin):
     search_fields = ("name",)
     ordering = ("name",)
     inlines = [CountyDepartmentInline]
+    
+
+# ============================================================
+#   COUNTY DEPARTMENT ADMIN
+# ============================================================
+
+@admin.register(CountyDepartment)
+class CountyDepartmentAdmin(admin.ModelAdmin):
+    list_display = (
+        "department",
+        "county",
+        "email",
+        "phone_number",
+        "office_location",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("county", "department", "is_active")
+    search_fields = (
+        "department__name",
+        "county__name",
+        "email",
+        "phone_number",
+        "office_location",
+    )
+    ordering = ("county__name", "department__name")
+    inlines = [DepartmentOfficialInline]
+
+
