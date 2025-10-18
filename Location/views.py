@@ -40,3 +40,29 @@ class CountyViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = SubCountySerializer(subcounties, many=True)
         return Response(serializer.data)
 
+# ============================================================
+#   SUBCOUNTY VIEWSET
+# ============================================================
+class SubCountyViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Provides list and detail views for subcounties.
+    Example:
+        GET /api/location/subcounties/
+        GET /api/location/subcounties/<id>/
+    """
+
+    queryset = SubCounty.objects.select_related("county").all().order_by("name")
+    serializer_class = SubCountySerializer
+    permission_classes = [permissions.AllowAny]
+
+    @action(detail=True, methods=["get"])
+    def wards(self, request, pk=None):
+        """
+        Returns all wards within a subcounty.
+        Example:
+            GET /api/location/subcounties/<id>/wards/
+        """
+        subcounty = self.get_object()
+        wards = subcounty.wards.all().order_by("name")
+        serializer = WardSerializer(wards, many=True)
+        return Response(serializer.data)
