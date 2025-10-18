@@ -6,6 +6,7 @@ dj-database-url==3.0.1
 Django==5.2.7
 django-cloudinary-storage==0.3.0
 django-cors-headers==4.9.0
+django-filter==25.2
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 geographiclib==2.1
