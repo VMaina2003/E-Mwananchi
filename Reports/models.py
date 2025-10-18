@@ -72,3 +72,13 @@ longitude = models.DecimalField(
         max_digits=9, decimal_places=6, null=True, blank=True,
         help_text="Longitude from GPS (auto-filled from Check My Location)."
     )
+
+ # --- Department ---
+department = models.ForeignKey(
+        CountyDepartment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reports",
+        help_text="County department responsible for this issue (auto-detected by AI)."
+    )
