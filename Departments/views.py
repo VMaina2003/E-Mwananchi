@@ -62,3 +62,27 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and (user.is_admin or user.is_superadmin):
             return queryset
         return queryset.filter(is_active=True)
+
+
+# ============================================================
+#   DEPARTMENT OFFICIAL VIEWSET
+# ============================================================
+class DepartmentOfficialViewSet(viewsets.ModelViewSet):
+    """
+    Manage assignment of officials to county departments.
+    - Admin/SuperAdmin can create/update/delete
+    - CountyOfficial can view only their own department
+    - Citizens/Viewers can only read
+    """
+
+    queryset = DepartmentOfficial.objects.select_related("user", "county_department").all()
+    serializer_class = DepartmentOfficialSerializer
+    permission_classes = [IsAdminOrSuperAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated and user.is_county_official:
+            return self.queryset.filter(user=user)
+        elif user.is_authenticated and (user.is_admin or user.is_superadmin):
+            return self.queryset
+        return DepartmentOfficial.objects.none()
