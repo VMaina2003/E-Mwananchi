@@ -53,3 +53,22 @@ class Report(models.Model):
  # --- Main Report Details ---
     title = models.CharField(max_length=255, help_text="Short summary of the issue.")
     description = models.TextField(help_text="Detailed explanation of the issue.")
+
+ # --- Location Data ---
+county = models.ForeignKey(
+        County, on_delete=models.PROTECT, related_name="reports"
+    )
+subcounty = models.ForeignKey(
+        SubCounty, on_delete=models.SET_NULL, null=True, blank=True, related_name="reports"
+    )
+ward = models.ForeignKey(
+        Ward, on_delete=models.SET_NULL, null=True, blank=True, related_name="reports"
+    )
+latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        help_text="Latitude from GPS (auto-filled from Check My Location)."
+    )
+longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        help_text="Longitude from GPS (auto-filled from Check My Location)."
+    )
