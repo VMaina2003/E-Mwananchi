@@ -157,3 +157,38 @@ class Report(models.Model):
             raise ValueError(f"Invalid status: {new_status}")
         self.status = new_status
         self.save(update_fields=["status"])
+        
+# ============================================================
+#   REPORT IMAGE MODEL
+# ============================================================
+class ReportImage(models.Model):
+    """
+    Stores images related to a report.
+    A report can have multiple images uploaded by the user as proof.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    report = models.ForeignKey(
+        Report,
+        on_delete=models.CASCADE,
+        related_name="images",
+        help_text="Report this image belongs to."
+    )
+    image = models.ImageField(
+        upload_to="report_images/",
+        help_text="Uploaded image (from camera or gallery)."
+    )
+    caption = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional description for the image."
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "Report Image"
+        verbose_name_plural = "Report Images"
+
+    def __str__(self):
+        return f"Image for {self.report.title}"
