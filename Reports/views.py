@@ -60,3 +60,83 @@ class CanUpdateStatus(permissions.BasePermission):
             CustomUser.Roles.ADMIN,
             CustomUser.Roles.SUPERADMIN,
         ]
+
+
+# ============================================================
+#   REPORT VIEWSET
+# ============================================================
+class ReportViewSet(viewsets.ModelViewSet):
+    """
+    Handles all CRUD operations for Reports.
+    - Citizens can create and view their own reports.
+    - County officials, admins, and superadmins can view all reports.
+    - Reporters can edit before verification.
+    """
+
+    queryset = Report.objects.all().select_related(
+        "reporter", "county", "subcounty", "ward", "department"
+    )
+    serializer_class = ReportSerializer
+    permission_classes = [IsAuthenticatedAndHasRole]
+
+    def get_queryset(self):
+        """Filter reports based on user role."""
+        user = self.request.user
+
+        if user.is_superadmin or user.is_admin:
+            return self.queryset  # View all reports
+
+        if user.is_county_official:
+            # View only reports from their county (simplified)
+            return self.queryset.filter(county__name__iexact=user.last_name)  # <-- adjust if you link official to county
+
+        # Citizen sees only their reports
+        return self.queryset.filter(reporter=user)
+
+    def perform_create(self, serializer):
+        """Auto-attach reporter and their role at submission."""
+        serializer.save(reporter=self.request.user, role_at_submission=self.request.user.role)
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete only (creator, admin, superadmin)."""
+        instance = self.get_object()
+        if not IsReporterOrAdmin().has_object_permission(request, self, instance):
+            return Response(
+                {"detail": "You are not allowed to delete this report."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        instance.soft_delete(user=request.user)
+        return Response({"detail": "Report deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+    # ------------------------------------------------------------
+    #   EXTRA ENDPOINT: /reports/{id}/status/
+    # ------------------------------------------------------------
+    @action(detail=True, methods=["patch"], url_path="status", permission_classes=[CanUpdateStatus])
+    def update_status(self, request, pk=None):
+        """
+        Used by officials/admins to update the report status.
+        Example:
+            PATCH /api/reports/{id}/status/
+            { "status": "on_progress" }
+        """
+        report = self.get_object()
+        serializer = ReportStatusUpdateSerializer(report, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": f"Status updated to '{report.status}'."}, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------
+    #   EXTRA ENDPOINT: /reports/{id}/verify/
+    # ------------------------------------------------------------
+    @action(detail=True, methods=["patch"], url_path="verify", permission_classes=[CanUpdateStatus])
+    def mark_verified(self, request, pk=None):
+        """
+        Used when AI or admin marks report as verified.
+        Example:
+            PATCH /api/reports/{id}/verify/
+            { "ai_confidence": 0.88 }
+        """
+        report = self.get_object()
+        confidence = request.data.get("ai_confidence")
+        report.mark_verified(confidence=confidence)
+        return Response({"detail": "Report marked as verified by AI."}, status=status.HTTP_200_OK)
