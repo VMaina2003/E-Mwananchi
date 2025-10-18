@@ -20,5 +20,5 @@ class CanManageLocationPoint(permissions.BasePermission):
         if not user.is_authenticated:
             return False
 
-        allowed_roles = ["admin", "superadmin", "county_official"]
+        allowed_roles = ["admin", "superadmin"]
         return getattr(user, "role", None) in allowed_roles
