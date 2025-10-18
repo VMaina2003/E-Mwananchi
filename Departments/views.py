@@ -39,3 +39,26 @@ class DepartmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOrSuperAdmin]
 
 
+# ============================================================
+#   COUNTY DEPARTMENT VIEWSET
+# ============================================================
+class CountyDepartmentViewSet(viewsets.ModelViewSet):
+    """
+    Manage departments linked to specific counties.
+    Example: Health Department - Nairobi County.
+    """
+
+    queryset = CountyDepartment.objects.select_related("county", "department").all()
+    serializer_class = CountyDepartmentSerializer
+    permission_classes = [IsAdminOrSuperAdmin]
+
+    def get_queryset(self):
+        """
+        Citizens, Viewers, and Officials can only view active departments.
+        Admins and SuperAdmins can view all.
+        """
+        user = self.request.user
+        queryset = super().get_queryset()
+        if user.is_authenticated and (user.is_admin or user.is_superadmin):
+            return queryset
+        return queryset.filter(is_active=True)
