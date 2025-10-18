@@ -63,6 +63,38 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
             return queryset
         return queryset.filter(is_active=True)
 
+    def create(self, request, *args, **kwargs):
+        """
+        Allow both single and bulk creation of county departments.
+        Example of bulk data:
+        [
+            {
+                "county": "Nairobi",
+                "department": "Health",
+                "email": "health@nairobi.go.ke",
+                "phone_number": "+254700123456",
+                "office_location": "City Hall, Nairobi"
+            },
+            {
+                "county": "Mombasa",
+                "department": "Education",
+                "email": "education@mombasa.go.ke",
+                "phone_number": "+254701234567",
+                "office_location": "Tononoka, Mombasa"
+            }
+        ]
+        """
+        data = request.data
+        if isinstance(data, list):  # Handle bulk creation
+            serializer = self.get_serializer(data=data, many=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_bulk_create(serializer)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
+
+    def perform_bulk_create(self, serializer):
+        """Helper to save multiple CountyDepartment records at once."""
+        serializer.save()
 
 # ============================================================
 #   DEPARTMENT OFFICIAL VIEWSET
