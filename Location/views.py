@@ -81,3 +81,20 @@ class WardViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Ward.objects.select_related("subcounty", "subcounty__county").all().order_by("name")
     serializer_class = WardSerializer
     permission_classes = [permissions.AllowAny]
+    
+
+# ============================================================
+#   LOCATION POINT VIEWSET
+# ============================================================
+class LocationPointViewSet(viewsets.ModelViewSet):
+    """
+    Handles citizen-reported GPS points.
+    Example:
+        POST /api/location/points/       -> Create a point
+        GET  /api/location/points/       -> List points
+        GET  /api/location/points/<id>/  -> Retrieve one
+    """
+
+    queryset = LocationPoint.objects.select_related("county", "subcounty", "ward").all().order_by("-created_at")
+    serializer_class = LocationPointSerializer
+    permission_classes = [permissions.AllowAny]  # You can later switch to IsAuthenticated
