@@ -1,6 +1,6 @@
 import json
 from django.core.management.base import BaseCommand
-from location.models import County, SubCounty, Ward
+from Location.models import County, SubCounty, Ward
 
 
 class Command(BaseCommand):
