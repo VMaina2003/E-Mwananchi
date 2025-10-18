@@ -107,11 +107,7 @@ class ReportSerializer(serializers.ModelSerializer):
         new_images = validated_data.pop("new_images", [])
 
         # Attach reporter info
-        report = Report.objects.create(
-            reporter=user,
-            role_at_submission=user.role,
-            **validated_data
-        )
+        report = Report.objects.create(**validated_data)
 
         # Handle image uploads
         if new_images:
