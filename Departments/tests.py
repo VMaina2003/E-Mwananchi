@@ -48,3 +48,35 @@ class CountyDepartment(models.Model):
 
     def __str__(self):
         return f"{self.department.name} - {self.county.name}"
+
+
+# ============================================================
+#   DEPARTMENT OFFICIAL MODEL
+# ============================================================
+class DepartmentOfficial(models.Model):
+    """Represents an official assigned to a specific county department."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="department_officials",
+        help_text="User linked to this official (must have role=county_official)"
+    )
+    county_department = models.ForeignKey(
+        CountyDepartment,
+        on_delete=models.CASCADE,
+        related_name="officials"
+    )
+    position = models.CharField(max_length=100, blank=True, null=True, help_text="e.g. Chief Officer, Director")
+    is_head = models.BooleanField(default=False, help_text="Is this the head of the department?")
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["county_department__county__name", "county_department__department__name", "user__first_name"]
+        verbose_name = "Department Official"
+        verbose_name_plural = "Department Officials"
+
+    def __str__(self):
+        return f"{self.user.get_full_name()} ({self.county_department})"
