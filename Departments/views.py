@@ -23,3 +23,19 @@ class IsAdminOrSuperAdmin(permissions.BasePermission):
             return True
         user = request.user
         return user.is_authenticated and (user.is_admin or user.is_superadmin)
+
+
+# ============================================================
+#   DEPARTMENT VIEWSET
+# ============================================================
+class DepartmentViewSet(viewsets.ModelViewSet):
+    """
+    Manage the list of all departments (e.g., Health, Education, Roads).
+    Only Admin/SuperAdmin can modify.
+    """
+
+    queryset = Department.objects.all().order_by("name")
+    serializer_class = DepartmentSerializer
+    permission_classes = [IsAdminOrSuperAdmin]
+
+
