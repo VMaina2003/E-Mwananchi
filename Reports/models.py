@@ -19,3 +19,37 @@ class ReportStatusChoices(models.TextChoices):
     RESOLVED = "resolved", "Resolved"
     REJECTED = "rejected", "Rejected (invalid or duplicate)"
     DELETED = "deleted", "Deleted"
+    
+# ============================================================
+#   REPORT MODEL
+# ============================================================
+class Report(models.Model):
+    """
+    Represents an issue reported by a citizen or official.
+
+    Each report captures:
+    - Reporter info (linked to CustomUser)
+    - Title, description, and optional images
+    - Exact location (County, Subcounty, Ward, GPS)
+    - Automatically or manually assigned department
+    - Status flow (Submitted → Verified → Pending → Noted → On Progress → Resolved)
+    - AI-based verification and confidence score
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # --- Reporter Info ---
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reports",
+        help_text="User who created this report."
+    )
+    role_at_submission = models.CharField(
+        max_length=32,
+        help_text="Snapshot of the reporter's role when submitting (e.g. citizen)."
+    )
+    
+ # --- Main Report Details ---
+    title = models.CharField(max_length=255, help_text="Short summary of the issue.")
+    description = models.TextField(help_text="Detailed explanation of the issue.")
