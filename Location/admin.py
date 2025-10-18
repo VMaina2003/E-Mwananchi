@@ -59,3 +59,14 @@ class WardAdmin(admin.ModelAdmin):
     def county_name(self, obj):
         return obj.subcounty.county.name
     county_name.short_description = "County"
+
+# ============================================================
+#   LOCATION POINT ADMIN
+# ============================================================
+
+@admin.register(LocationPoint)
+class LocationPointAdmin(admin.ModelAdmin):
+    list_display = ("latitude", "longitude", "county", "subcounty", "ward", "address_text", "created_at")
+    list_filter = ("county", "subcounty", "ward")
+    search_fields = ("address_text", "county__name", "subcounty__name", "ward__name")
+    ordering = ("-created_at",)
