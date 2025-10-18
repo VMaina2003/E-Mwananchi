@@ -40,3 +40,24 @@ class SubCounty(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.county.name})"
+    
+# ============================================================
+#   WARD MODEL
+# ============================================================
+class Ward(models.Model):
+    """Represents an electoral ward within a sub-county."""
+
+    subcounty = models.ForeignKey(SubCounty, on_delete=models.CASCADE, related_name="wards")
+    name = models.CharField(max_length=100)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("subcounty", "name")
+        ordering = ["name"]
+        verbose_name_plural = "Wards"
+
+    def __str__(self):
+        return f"{self.name} - {self.subcounty.name}, {self.subcounty.county.name}"
