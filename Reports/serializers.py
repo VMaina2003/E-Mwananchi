@@ -139,3 +139,27 @@ class ReportSerializer(serializers.ModelSerializer):
         instance.updated_at = timezone.now()
         instance.save()
         return instance
+    
+# ============================================================
+#   REPORT STATUS UPDATE SERIALIZER
+# ============================================================
+class ReportStatusUpdateSerializer(serializers.ModelSerializer):
+    """
+    Used by officials, admins, or superadmins to update the status of a report.
+    """
+
+    class Meta:
+        model = Report
+        fields = ["status"]
+
+    def validate_status(self, value):
+        """Ensure provided status is valid."""
+        valid_choices = [choice[0] for choice in ReportStatusChoices.choices]
+        if value not in valid_choices:
+            raise serializers.ValidationError(f"Invalid status '{value}'.")
+        return value
+
+    def update(self, instance, validated_data):
+        new_status = validated_data["status"]
+        instance.mark_status(new_status)
+        return instance
