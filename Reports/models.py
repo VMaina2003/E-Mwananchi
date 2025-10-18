@@ -19,7 +19,8 @@ class ReportStatusChoices(models.TextChoices):
     RESOLVED = "resolved", "Resolved"
     REJECTED = "rejected", "Rejected (invalid or duplicate)"
     DELETED = "deleted", "Deleted"
-    
+
+
 # ============================================================
 #   REPORT MODEL
 # ============================================================
@@ -49,32 +50,32 @@ class Report(models.Model):
         max_length=32,
         help_text="Snapshot of the reporter's role when submitting (e.g. citizen)."
     )
-    
- # --- Main Report Details ---
+
+    # --- Main Report Details ---
     title = models.CharField(max_length=255, help_text="Short summary of the issue.")
     description = models.TextField(help_text="Detailed explanation of the issue.")
 
- # --- Location Data ---
-county = models.ForeignKey(
+    # --- Location Data ---
+    county = models.ForeignKey(
         County, on_delete=models.PROTECT, related_name="reports"
     )
-subcounty = models.ForeignKey(
+    subcounty = models.ForeignKey(
         SubCounty, on_delete=models.SET_NULL, null=True, blank=True, related_name="reports"
     )
-ward = models.ForeignKey(
+    ward = models.ForeignKey(
         Ward, on_delete=models.SET_NULL, null=True, blank=True, related_name="reports"
     )
-latitude = models.DecimalField(
+    latitude = models.DecimalField(
         max_digits=9, decimal_places=6, null=True, blank=True,
         help_text="Latitude from GPS (auto-filled from Check My Location)."
     )
-longitude = models.DecimalField(
+    longitude = models.DecimalField(
         max_digits=9, decimal_places=6, null=True, blank=True,
         help_text="Longitude from GPS (auto-filled from Check My Location)."
     )
 
- # --- Department ---
-department = models.ForeignKey(
+    # --- Department ---
+    department = models.ForeignKey(
         CountyDepartment,
         on_delete=models.SET_NULL,
         null=True,
@@ -83,22 +84,22 @@ department = models.ForeignKey(
         help_text="County department responsible for this issue (auto-detected by AI)."
     )
 
-   # --- AI Verification ---
-verified_by_ai = models.BooleanField(
+    # --- AI Verification ---
+    verified_by_ai = models.BooleanField(
         default=False,
         help_text="True if the AI verified this report automatically."
     )
-ai_confidence = models.FloatField(
+    ai_confidence = models.FloatField(
         null=True, blank=True,
         help_text="Confidence score from AI model (0.0–1.0)."
     )
-image_required_passed = models.BooleanField(
+    image_required_passed = models.BooleanField(
         default=False,
         help_text="True if required image evidence was provided."
     )
 
-   # --- Status Tracking ---
-status = models.CharField(
+    # --- Status Tracking ---
+    status = models.CharField(
         max_length=20,
         choices=ReportStatusChoices.choices,
         default=ReportStatusChoices.SUBMITTED,
@@ -106,10 +107,10 @@ status = models.CharField(
     )
 
     # --- Metadata & Audit ---
-created_at = models.DateTimeField(auto_now_add=True)
-updated_at = models.DateTimeField(auto_now=True)
-deleted_at = models.DateTimeField(null=True, blank=True)
-deleted_by = models.ForeignKey(
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
@@ -117,3 +118,42 @@ deleted_by = models.ForeignKey(
         related_name="deleted_reports",
         help_text="User who deleted the report (soft delete)."
     )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Report"
+        verbose_name_plural = "Reports"
+
+    def __str__(self):
+        return f"{self.title} ({self.county.name})"
+    
+    # ---------------------------------------------------------------------
+    #   Helper Methods
+    # ---------------------------------------------------------------------
+    def soft_delete(self, user=None):
+        """Marks the report as deleted without actually removing it."""
+        self.status = ReportStatusChoices.DELETED
+        self.deleted_at = timezone.now()
+        if user:
+            self.deleted_by = user
+        self.save(update_fields=["status", "deleted_at", "deleted_by"])
+
+    def is_editable_by_reporter(self):
+        """Reporter can edit only before it’s verified."""
+        return self.status == ReportStatusChoices.SUBMITTED
+
+    def mark_verified(self, confidence=None):
+        """Used when AI verification passes."""
+        self.verified_by_ai = True
+        self.status = ReportStatusChoices.VERIFIED
+        if confidence:
+            self.ai_confidence = confidence
+        self.save(update_fields=["verified_by_ai", "status", "ai_confidence"])
+
+    def mark_status(self, new_status):
+        """Safely update status with validation."""
+        valid_statuses = [choice[0] for choice in ReportStatusChoices.choices]
+        if new_status not in valid_statuses:
+            raise ValueError(f"Invalid status: {new_status}")
+        self.status = new_status
+        self.save(update_fields=["status"])
