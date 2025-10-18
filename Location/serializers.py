@@ -30,3 +30,25 @@ class WardSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ward
         fields = ["id", "name", "latitude", "longitude", "subcounty"]
+        
+
+# ============================================================
+#   LOCATION POINT SERIALIZER
+# ============================================================
+class LocationPointSerializer(serializers.ModelSerializer):
+    county = serializers.StringRelatedField(read_only=True)
+    subcounty = serializers.StringRelatedField(read_only=True)
+    ward = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = LocationPoint
+        fields = [
+            "id",
+            "latitude",
+            "longitude",
+            "address_text",
+            "county",
+            "subcounty",
+            "ward",
+            "created_at",
+        ]
