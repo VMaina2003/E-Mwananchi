@@ -62,3 +62,33 @@ class CountyDepartmentAdmin(admin.ModelAdmin):
     inlines = [DepartmentOfficialInline]
 
 
+# ============================================================
+#   DEPARTMENT OFFICIAL ADMIN
+# ============================================================
+
+@admin.register(DepartmentOfficial)
+class DepartmentOfficialAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "county_department",
+        "get_county",
+        "get_department",
+        "position",
+        "is_head",
+    )
+    list_filter = ("is_head", "county_department__county", "county_department__department")
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "county_department__county__name",
+        "county_department__department__name",
+    )
+    ordering = ("county_department__county__name", "county_department__department__name")
+
+    def get_county(self, obj):
+        return obj.county_department.county.name
+    get_county.short_description = "County"
+
+    def get_department(self, obj):
+        return obj.county_department.department.name
+    get_department.short_description = "Department"
