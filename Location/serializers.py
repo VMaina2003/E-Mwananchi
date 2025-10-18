@@ -9,3 +9,13 @@ class CountySerializer(serializers.ModelSerializer):
     class Meta:
         model = County
         fields = ["id", "name", "code", "capital"]
+
+# ============================================================
+#   SUBCOUNTY SERIALIZER
+# ============================================================
+class SubCountySerializer(serializers.ModelSerializer):
+    county = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = SubCounty
+        fields = ["id", "name", "code", "county"]
