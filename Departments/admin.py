@@ -21,3 +21,15 @@ class DepartmentOfficialInline(admin.TabularInline):
     fields = ("user", "position", "is_head")
     show_change_link = True
 
+
+
+# ============================================================
+#   DEPARTMENT ADMIN
+# ============================================================
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "description", "created_at")
+    search_fields = ("name",)
+    ordering = ("name",)
+    inlines = [CountyDepartmentInline]
