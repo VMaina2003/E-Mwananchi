@@ -6,7 +6,8 @@ from django.utils import timezone
 from .models import Report, ReportImage, ReportStatusChoices
 from .serializers import ReportSerializer, ReportStatusUpdateSerializer
 from Authentication.models import CustomUser
-
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
 
 # ============================================================
 #   CUSTOM PERMISSIONS
@@ -78,7 +79,33 @@ class ReportViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ReportSerializer
     permission_classes = [IsAuthenticatedAndHasRole]
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 
+    #  Filter by specific fields
+    filterset_fields = [
+        "status",
+        "county",
+        "department",
+        "verified_by_ai",
+        "reporter",
+    ]
+
+    #  Allow text search
+    search_fields = [
+        "title",
+        "description",
+        "county__name",
+        "subcounty__name",
+        "ward__name",
+        "department__department__name",
+    ]
+
+    #  Allow ordering
+    ordering_fields = ["created_at", "updated_at", "ai_confidence", "status"]
+    ordering = ["-created_at"]  # default ordering
+    
+    
     def get_queryset(self):
         """Filter reports based on user role."""
         user = self.request.user
