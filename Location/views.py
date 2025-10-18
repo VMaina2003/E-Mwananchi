@@ -66,3 +66,18 @@ class SubCountyViewSet(viewsets.ReadOnlyModelViewSet):
         wards = subcounty.wards.all().order_by("name")
         serializer = WardSerializer(wards, many=True)
         return Response(serializer.data)
+    
+# ============================================================
+#   WARD VIEWSET
+# ============================================================
+class WardViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Provides list and detail views for wards.
+    Example:
+        GET /api/location/wards/
+        GET /api/location/wards/<id>/
+    """
+
+    queryset = Ward.objects.select_related("subcounty", "subcounty__county").all().order_by("name")
+    serializer_class = WardSerializer
+    permission_classes = [permissions.AllowAny]
