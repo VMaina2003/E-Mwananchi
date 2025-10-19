@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'Location',
     'Departments',
     'Reports',
+    'comments',
 ]
 
 MIDDLEWARE = [
