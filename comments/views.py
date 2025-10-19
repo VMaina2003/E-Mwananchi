@@ -23,3 +23,20 @@ class CanDeleteComment(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
         return obj.can_delete(user)
+    
+# ============================================================
+#   COMMENT VIEWSET
+# ============================================================
+
+class CommentViewSet(viewsets.ModelViewSet):
+    """
+    Handles creating, listing, and deleting comments.
+    Supports citizen and official comment sections.
+    """
+
+    queryset = Comment.objects.filter(is_deleted=False).select_related("user", "report")
+    serializer_class = CommentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["content", "user__email", "user__first_name"]
+    ordering_fields = ["created_at"]
