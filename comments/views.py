@@ -97,3 +97,17 @@ class CommentViewSet(viewsets.ModelViewSet):
             {"detail": "Comment deleted successfully."},
             status=status.HTTP_204_NO_CONTENT,
         )
+        
+
+    # ======================================================
+    #   CUSTOM ACTION: GET COMMENTS BY REPORT
+    # ======================================================
+    @action(detail=False, methods=["get"], url_path="report/(?P<report_id>[^/.]+)")
+    def get_by_report(self, request, report_id=None):
+        """
+        Get all comments for a specific report (both citizen & official).
+        Example URL: /api/comments/report/<report_id>/
+        """
+        comments = self.get_queryset().filter(report_id=report_id)
+        serializer = self.get_serializer(comments, many=True)
+        return Response(serializer.data)
