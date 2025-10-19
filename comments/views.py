@@ -40,3 +40,19 @@ class CommentViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["content", "user__email", "user__first_name"]
     ordering_fields = ["created_at"]
+    
+    # ======================================================
+    #   LIST / FILTER COMMENTS
+    # ======================================================
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        report_id = self.request.query_params.get("report")
+        comment_type = self.request.query_params.get("comment_type")
+
+        if report_id:
+            queryset = queryset.filter(report_id=report_id)
+        if comment_type in ["citizen", "official"]:
+            queryset = queryset.filter(comment_type=comment_type)
+
+        return queryset
