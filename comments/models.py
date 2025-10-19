@@ -30,3 +30,25 @@ class Comment(models.Model):
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="replies"
     )
+    
+    # Control and timestamps
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Comment by {self.user.email} on {self.report.title}"
+
+    def can_delete(self, user):
+        """
+        Determines if the given user is allowed to delete this comment.
+        """
+        return (
+            user == self.user
+            or user.is_admin
+            or user.is_superadmin
+            or user.is_county_official
+        )
