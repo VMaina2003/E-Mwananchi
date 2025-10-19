@@ -77,3 +77,23 @@ class CommentViewSet(viewsets.ModelViewSet):
 
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    # ======================================================
+    #   DELETE COMMENT
+    # ======================================================
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+
+        # Check custom delete permission
+        if not comment.can_delete(request.user):
+            return Response(
+                {"detail": "You do not have permission to delete this comment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        comment.is_deleted = True
+        comment.save(update_fields=["is_deleted"])
+        return Response(
+            {"detail": "Comment deleted successfully."},
+            status=status.HTTP_204_NO_CONTENT,
+        )
