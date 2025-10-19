@@ -56,3 +56,24 @@ class CommentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(comment_type=comment_type)
 
         return queryset
+    
+ # ======================================================
+    #   CREATE COMMENT
+    # ======================================================
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        # Ensure the related report exists and is active
+        report_id = serializer.validated_data.get("report").id
+        report = get_object_or_404(Report, id=report_id)
+
+        # Only verified and active users can comment
+        if not request.user.is_active or not request.user.verified:
+            return Response(
+                {"detail": "Please verify your account to comment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
