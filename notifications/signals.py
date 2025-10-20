@@ -32,3 +32,38 @@ def notify_on_new_report(sender, instance, created, **kwargs):
                 target_type="report",
                 target_id=instance.id,
             )
+
+
+# ===============================================
+#   COMMENT CREATED — Notify Report Owner & Officials
+# ===============================================
+@receiver(post_save, sender=Comment)
+def notify_on_new_comment(sender, instance, created, **kwargs):
+    """
+    When a new comment is posted on a report:
+    → Notify report owner (if not the same user)
+    → Notify county officials linked to the report
+    """
+    if created:
+        report = instance.report
+        commenter = instance.user
+
+        from Users.models import CustomUser
+        recipients = CustomUser.objects.filter(
+            county=report.county, role__in=["CountyOfficial", "Admin"]
+        )
+
+        # Notify report creator (if not the one commenting)
+        if report.created_by != commenter:
+            recipients = recipients | CustomUser.objects.filter(id=report.created_by.id)
+
+        # Send notification
+        for user in recipients.distinct():
+            Notification.objects.create(
+                recipient=user,
+                actor=commenter,
+                verb="commented on",
+                message=f"{commenter.get_full_name()} commented on your report '{report.title}'",
+                target_type="comment",
+                target_id=instance.id,
+            )
