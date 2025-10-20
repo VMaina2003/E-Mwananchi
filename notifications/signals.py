@@ -3,7 +3,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from .models import Notification
 from Reports.models import Report
-from Comments.models import Comment
+from comments.models import Comment
 
 # ===============================================
 #   REPORT CREATED — Notify Admins/Officials
@@ -18,7 +18,7 @@ def notify_on_new_report(sender, instance, created, **kwargs):
         county = instance.county
         reporter = instance.created_by
 
-        from Users.models import CustomUser
+        from Authentication.models import CustomUser
         recipients = CustomUser.objects.filter(
             county=county, role__in=["Admin", "CountyOfficial"]
         )
@@ -48,7 +48,7 @@ def notify_on_new_comment(sender, instance, created, **kwargs):
         report = instance.report
         commenter = instance.user
 
-        from Users.models import CustomUser
+        from Authentication.models import CustomUser
         recipients = CustomUser.objects.filter(
             county=report.county, role__in=["CountyOfficial", "Admin"]
         )
