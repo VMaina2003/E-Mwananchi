@@ -13,7 +13,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """
+        """a
         Return notifications for the logged-in user.
         """
         user = self.request.user

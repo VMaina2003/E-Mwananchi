@@ -171,3 +171,8 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+
+import os
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
