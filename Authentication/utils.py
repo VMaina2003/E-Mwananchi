@@ -1,12 +1,12 @@
 from datetime import timedelta
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import send_mail, BadHeaderError
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.utils import timezone
-from django.urls import reverse
 from rest_framework_simplejwt.tokens import AccessToken
 from django.contrib.auth import get_user_model
+from smtplib import SMTPException
 
 User = get_user_model()
 
@@ -40,7 +40,7 @@ def verify_email_token(token):
 
 
 def send_verification_email(user, request=None):
-    """Send HTML email with verification link."""
+    """Send HTML email with verification link and detailed error logging."""
     token = generate_verification_token(user)
     verification_url = f"http://127.0.0.1:8000/api/auth/verify-email/?token={token}"
 
@@ -54,11 +54,27 @@ def send_verification_email(user, request=None):
     html_message = render_to_string("Authentication/email_verification.html", context)
     plain_message = strip_tags(html_message)
 
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "e.mwananchi254@gmail.com")
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
     recipient_list = [user.email]
 
-    send_mail(subject, plain_message, from_email, recipient_list, html_message=html_message)
-    return True
+    try:
+        send_mail(
+            subject,
+            plain_message,
+            from_email,
+            recipient_list,
+            html_message=html_message,
+        )
+        print(f" Verification email sent successfully to: {user.email}")
+        return True
+    except BadHeaderError:
+        print(" Verification email failed: Invalid header found.")
+    except SMTPException as e:
+        print(f"Verification email failed: SMTPException -> {e}")
+    except Exception as e:
+        print(f" Verification email failed (Unexpected): {e}")
+
+    return False
 
 
 # ============================================================
@@ -91,7 +107,7 @@ def verify_password_reset_token(token):
 
 
 def send_password_reset_email(user):
-    """Send an HTML email with password reset link."""
+    """Send an HTML email with password reset link safely (handles Gmail errors)."""
     token = generate_password_reset_token(user)
     reset_url = f"http://127.0.0.1:8000/api/auth/reset-password/?token={token}"
 
@@ -105,8 +121,19 @@ def send_password_reset_email(user):
     html_message = render_to_string("Authentication/password_reset_email.html", context)
     plain_message = strip_tags(html_message)
 
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "e.mwananchi254@gmail.com")
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
     recipient_list = [user.email]
 
-    send_mail(subject, plain_message, from_email, recipient_list, html_message=html_message)
-    return True
+    try:
+        send_mail(
+            subject,
+            plain_message,
+            from_email,
+            recipient_list,
+            html_message=html_message,
+        )
+        print(f" Password reset email sent successfully to: {user.email}")
+        return True
+    except (BadHeaderError, SMTPException) as e:
+        print(f"Password reset email failed: {e}")
+        return False

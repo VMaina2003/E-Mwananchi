@@ -68,18 +68,18 @@ class RegisterSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        """Create inactive, unverified user."""
         user = User.objects.create_user(
             email=validated_data["email"],
             first_name=validated_data.get("first_name", ""),
             last_name=validated_data.get("last_name", ""),
             password=validated_data["password"],
+            is_active=False,
+            verified=False,
+            role=User.Roles.CITIZEN,
         )
-
-        user.role = User.Roles.CITIZEN
-        user.save()
-
-        send_verification_email(user)
         return user
+
 
 
 # ============================================================

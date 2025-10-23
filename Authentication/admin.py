@@ -14,6 +14,7 @@ class CustomUserAdmin(BaseUserAdmin):
         "first_name",
         "last_name",
         "role",
+        "county",
         "is_active",
         "verified",
         "is_staff",

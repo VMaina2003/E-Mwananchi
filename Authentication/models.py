@@ -4,6 +4,7 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+from Location.models import County
 
 
 class UserManager(BaseUserManager):
@@ -62,6 +63,14 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     - Includes a `role` TextChoices for the app roles
     - `verified` controls whether the user confirmed their email
     """
+    county = models.ForeignKey(
+        County,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users",
+        help_text="County where the report belongs or works."
+    )
 
     class Roles(models.TextChoices):
         CITIZEN = "citizen", "Citizen"
