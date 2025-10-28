@@ -5,6 +5,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenVerifyView
 
+from smtplib import SMTPException, SMTPRecipientsRefused # Kept import for clarity
+
+# Import your serializers and utils
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
@@ -22,11 +25,12 @@ User = get_user_model()
 
 
 # ============================================================
-#   REGISTER VIEW (Updated)
+#   REGISTER VIEW
 # ============================================================
-from smtplib import SMTPException, SMTPRecipientsRefused
-
 class RegisterView(generics.CreateAPIView):
+    """
+    Handles user registration and sends a verification email.
+    """
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -36,31 +40,45 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
 
         try:
+            # Attempt to send the verification email
             email_sent = send_verification_email(user)
+
             if email_sent:
                 return Response(
                     {"message": "Account created. Please check your email to verify your account."},
                     status=status.HTTP_201_CREATED,
                 )
             else:
+                # If send_mail returns False but no exception was raised
+                # This could happen if an internal logic error prevents sending
                 user.delete()
                 return Response(
-                    {"email": "Verification email could not be sent. Please try again later."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"detail": "Verification email could not be sent. Please try again later."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE, # Use 503 for service issues
                 )
+                
         except (SMTPException, SMTPRecipientsRefused) as e:
+            # Handle rate limiting (450 4.2.1) and other SMTP errors gracefully
             print(f" Email sending failed: {e}")
+            user.delete() # Ensure the user is not left in an unverified state
+            return Response(
+                {"detail": "Verification email service is temporarily unavailable. Please try again later."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception as e:
+            # Catch any other unexpected errors during the email process
+            print(f" Unexpected error during email sending: {e}")
             user.delete()
             return Response(
-                {"email": "Verification email could not be sent. Please try again later."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "An unexpected error occurred during registration. Please contact support."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
-
+# ------------------------------------------------------------
 
 # ============================================================
-#   EMAIL VERIFICATION VIEW
+#   EMAIL VERIFICATION VIEW
 # ============================================================
 class VerifyEmailView(APIView):
     """Verify a user's email through a token link."""
@@ -70,113 +88,107 @@ class VerifyEmailView(APIView):
     def get(self, request):
         token = request.GET.get("token")
         if not token:
-            return Response({"error": "Token is missing."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Verification token is missing."}, status=status.HTTP_400_BAD_REQUEST)
 
         user = verify_email_token(token)
         if not user:
-            return Response({"error": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
 
         if user.verified:
-            return Response({"message": "Email already verified."}, status=status.HTTP_200_OK)
+            return Response({"detail": "Email already verified."}, status=status.HTTP_200_OK)
 
+        # Use bulk update for atomicity and simplicity
         user.verified = True
         user.is_active = True
         user.save(update_fields=["verified", "is_active"])
-        return Response({"message": "Email verified successfully. You can now log in."})
+        
+        # Consider redirecting to a front-end success page here instead of returning JSON
+        # return Response({"detail": "Email verified successfully. You can now log in."})
+        return Response({"detail": "Email verified successfully. You can now log in."}, status=status.HTTP_200_OK)
 
+
+# ------------------------------------------------------------
 
 # ============================================================
-#   LOGIN VIEW
+#   LOGIN VIEW (Refined)
 # ============================================================
 class LoginView(APIView):
-    """Authenticate user and return JWT tokens if verified."""
-
+    """
+    Authenticate user and return JWT tokens if verified.
+    Uses the serializer's validation to handle authentication logic.
+    """
     permission_classes = [permissions.AllowAny]
-
+    
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
+        # The serializer.is_valid() will handle all validation, including authentication,
+        # and raise exceptions (400, 401, 403) based on its logic.
         serializer.is_valid(raise_exception=True)
+        
+        # Extracted data from validated_data in serializer is now cleaner
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
-        email = serializer.validated_data["email"]
-        password = serializer.validated_data["password"]
 
-        user = authenticate(request, email=email, password=password)
-
-        if not user:
-            return Response({"error": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
-
-        if not user.verified or not user.is_active:
-            return Response({"error": "Please verify your email first."}, status=status.HTTP_403_FORBIDDEN)
-
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": {
-                    "id": str(user.id),
-                    "email": user.email,
-                    "full_name": user.get_full_name(),
-                    "role": user.role,
-                },
-            },
-            status=status.HTTP_200_OK,
-        )
-
+# ------------------------------------------------------------
 
 # ============================================================
-#   REQUEST PASSWORD RESET VIEW
+#   REQUEST PASSWORD RESET VIEW
 # ============================================================
-class RequestPasswordResetView(APIView):
+class RequestPasswordResetView(generics.GenericAPIView):
     """Send password reset link to user's email."""
 
     permission_classes = [permissions.AllowAny]
-
+    serializer_class = PasswordResetRequestSerializer
+    
     def post(self, request):
-        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        email = serializer.validated_data["email"]
+        # The logic to find the user and send the email is handled in the serializer's save() method
+        # and we use the 'pass' logic to prevent enumeration attacks.
         try:
-            user = User.objects.get(email=email)
-            send_password_reset_email(user)
-        except User.DoesNotExist:
-            pass  # Prevent leaking valid/invalid emails
-
+            serializer.save() 
+        except (SMTPException, SMTPRecipientsRefused) as e:
+            print(f"Password reset email failed (SMTP): {e}")
+            # Still return a 200 OK to prevent enumeration, but log the error
+            pass 
+        except Exception as e:
+            print(f"Password reset email failed (Unexpected): {e}")
+            pass
+            
         return Response(
-            {"message": "If this email exists, a password reset link has been sent."},
+            {"detail": "If an account with that email exists, a password reset link has been sent."},
             status=status.HTTP_200_OK,
         )
 
 
+# ------------------------------------------------------------
+
 # ============================================================
-#   PASSWORD RESET CONFIRM VIEW
+#   PASSWORD RESET CONFIRM VIEW
 # ============================================================
-class ResetPasswordView(APIView):
-    """Confirm password reset using token."""
+class ResetPasswordView(generics.GenericAPIView):
+    """Confirm password reset using token and set new password."""
 
     permission_classes = [permissions.AllowAny]
+    serializer_class = PasswordResetConfirmSerializer
 
     def post(self, request):
-        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
+        # Password setting is handled in the serializer's save() method
+        serializer.save()
+        
+        return Response({"detail": "Password reset successfully."}, status=status.HTTP_200_OK)
 
-        token = serializer.validated_data["token"]
-        new_password = serializer.validated_data["new_password"]
 
-        user = verify_password_reset_token(token)
-        if not user:
-            return Response({"error": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
-
-        user.set_password(new_password)
-        user.save(update_fields=["password"])
-        return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
-
+# ------------------------------------------------------------
 
 # ============================================================
-#   TOKEN VERIFY VIEW
+#   TOKEN VERIFY VIEW (Custom TokenVerifyView)
 # ============================================================
 class CustomTokenVerifyView(TokenVerifyView):
     """Verifies JWT token validity."""
-
+    # No changes needed here, as it inherits the best default behavior.
     permission_classes = [permissions.AllowAny]

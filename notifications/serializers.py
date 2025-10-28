@@ -5,6 +5,9 @@ from .models import Notification
 class NotificationSerializer(serializers.ModelSerializer):
     actor_name = serializers.SerializerMethodField()
     report_title = serializers.SerializerMethodField()
+    
+    # Custom field to display the related report's ID (assuming 'target' is the GFK)
+    target_id = serializers.ReadOnlyField(source='target.id') 
 
     class Meta:
         model = Notification
@@ -16,7 +19,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             "verb",
             "description",
             "report_title",
-            "target_report",
+             
+            "target_id",
             "is_read",
             "created_at",
         ]
@@ -28,7 +32,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             "verb",
             "description",
             "report_title",
-            "target_report",
+             
+            "target_id",
             "created_at",
         ]
 
@@ -43,8 +48,11 @@ class NotificationSerializer(serializers.ModelSerializer):
         return None
 
     def get_report_title(self, obj):
-        """Return the title of the related report."""
-        return obj.target_report.title if obj.target_report else None
+        """Return the title of the related report, assuming 'target' is the Report instance."""
+        #  Check if target exists AND if it has a 'title' attribute (i.e., it's a Report)
+        if obj.target and hasattr(obj.target, 'title'):
+            return obj.target.title 
+        return None
 
 
 class NotificationUpdateSerializer(serializers.ModelSerializer):
