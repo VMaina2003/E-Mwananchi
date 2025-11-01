@@ -222,21 +222,26 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         new_password = attrs.get('new_password')
         confirm_password = attrs.get('confirm_password')
 
-        # Check password match
+        # Check password match FIRST
         if new_password != confirm_password:
             raise serializers.ValidationError({
                 'confirm_password': 'Passwords do not match.'
             })
 
-        # Validate token
+        # Validate token BEFORE password validation
         user = verify_password_reset_token(token)
         if not user:
             raise serializers.ValidationError({
                 'token': 'Invalid or expired reset token.'
             })
 
-        # Validate password strength
-        validate_password(new_password)
+        # Validate password strength - this should show specific errors
+        try:
+            validate_password(new_password)
+        except ValidationError as e:
+            raise serializers.ValidationError({
+                'new_password': list(e.messages)  # This returns specific password errors
+            })
         
         attrs['user'] = user
         return attrs
