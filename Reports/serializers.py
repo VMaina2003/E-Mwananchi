@@ -94,41 +94,35 @@ class ReportSerializer(serializers.ModelSerializer):
         return data
 
     # --------------------------------------------------------
-    #   CREATE METHOD
+    #   CREATE METHOD (FIXED VERSION)
     # --------------------------------------------------------
+    def create(self, validated_data):
+        """
+        Custom create method:
+        - Attaches the reporter and role.
+        - Handles image uploads.
+        """
+        # Extract images if provided
+        new_images = validated_data.pop("new_images", [])
+        
+        # Get reporter from context (set by the view)
+        reporter = self.context['request'].user
+        
+        # Create the report with reporter and role
+        report = Report.objects.create(
+            reporter=reporter,
+            role_at_submission=reporter.role,
+            **validated_data
+        )
+        
+        # Handle image uploads
+        if new_images:
+            for image_file in new_images:
+                ReportImage.objects.create(report=report, image=image_file)
+            report.image_required_passed = True
+            report.save(update_fields=["image_required_passed"])
 
-def create(self, validated_data):
-    """
-    Custom create method:
-    - Attaches the reporter and role.
-    - Handles image uploads.
-    """
-    # 1. Pop 'reporter' from validated_data, as it's passed separately in save()
-    # If the view did: serializer.save(reporter=request.user), 
-    # then validated_data will CONTAIN 'reporter', causing the error.
-    user = validated_data.pop("reporter", None) 
-    
-    # Extract images if provided
-    new_images = validated_data.pop("new_images", [])
-
-    # Create the report with reporter and role
-    # The **validated_data now contains all fields EXCEPT 'reporter'
-    report = Report.objects.create(
-        reporter=user,
-        role_at_submission=user.role if user else None,
-        **validated_data
-    )
-
-
-    
-    # Handle image uploads
-    if new_images:
-        for image_file in new_images:
-            ReportImage.objects.create(report=report, image=image_file)
-        report.image_required_passed = True
-        report.save(update_fields=["image_required_passed"])
-
-    return report
+        return report
 
     # --------------------------------------------------------
     #   UPDATE METHOD
