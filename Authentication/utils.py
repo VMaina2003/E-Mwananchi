@@ -42,7 +42,8 @@ def verify_email_token(token):
 def send_verification_email(user, request=None):
     """Send HTML email with verification link and detailed error logging."""
     token = generate_verification_token(user)
-    verification_url = f"http://127.0.0.1:8000/api/auth/verify-email/?token={token}"
+    # CHANGE THIS LINE - point to React frontend
+    verification_url = f"http://localhost:5173/verify-email?token={token}"
 
     subject = "Verify Your Email - E-Mwananchi"
     context = {
@@ -77,6 +78,39 @@ def send_verification_email(user, request=None):
     return False
 
 
+def send_password_reset_email(user):
+    """Send an HTML email with password reset link safely (handles Gmail errors)."""
+    token = generate_password_reset_token(user)
+    # CHANGE THIS LINE - point to React frontend
+    reset_url = f"http://localhost:5173/reset-password?token={token}"
+
+    subject = "Reset Your Password - E-Mwananchi"
+    context = {
+        "user": user,
+        "reset_url": reset_url,
+        "current_year": timezone.now().year,
+    }
+
+    html_message = render_to_string("Authentication/password_reset_email.html", context)
+    plain_message = strip_tags(html_message)
+
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
+    recipient_list = [user.email]
+
+    try:
+        send_mail(
+            subject,
+            plain_message,
+            from_email,
+            recipient_list,
+            html_message=html_message,
+        )
+        print(f" Password reset email sent successfully to: {user.email}")
+        return True
+    except (BadHeaderError, SMTPException) as e:
+        print(f"Password reset email failed: {e}")
+        return False
+
 # ============================================================
 #   PASSWORD RESET UTILITIES
 # ============================================================
@@ -106,34 +140,3 @@ def verify_password_reset_token(token):
         return None
 
 
-def send_password_reset_email(user):
-    """Send an HTML email with password reset link safely (handles Gmail errors)."""
-    token = generate_password_reset_token(user)
-    reset_url = f"http://127.0.0.1:8000/api/auth/reset-password/?token={token}"
-
-    subject = "Reset Your Password - E-Mwananchi"
-    context = {
-        "user": user,
-        "reset_url": reset_url,
-        "current_year": timezone.now().year,
-    }
-
-    html_message = render_to_string("Authentication/password_reset_email.html", context)
-    plain_message = strip_tags(html_message)
-
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
-    recipient_list = [user.email]
-
-    try:
-        send_mail(
-            subject,
-            plain_message,
-            from_email,
-            recipient_list,
-            html_message=html_message,
-        )
-        print(f" Password reset email sent successfully to: {user.email}")
-        return True
-    except (BadHeaderError, SMTPException) as e:
-        print(f"Password reset email failed: {e}")
-        return False
