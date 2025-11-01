@@ -20,7 +20,7 @@
         overflow: hidden;
       }
       .header {
-        background: #0369a1;
+        background: #006600; /* Kenya Green */
         color: #ffffff;
         text-align: center;
         padding: 25px;
@@ -40,13 +40,17 @@
       }
       .button {
         display: inline-block;
-        background: #0369a1;
+        background: #006600; /* Kenya Green */
         color: #ffffff !important;
         text-decoration: none;
         padding: 12px 22px;
         border-radius: 8px;
         font-weight: bold;
         font-size: 16px;
+        transition: background-color 0.2s;
+      }
+      .button:hover {
+        background: #004d00; /* Darker green on hover */
       }
       .footer {
         text-align: center;
@@ -55,12 +59,18 @@
         color: #6b7280;
         border-top: 1px solid #e5e7eb;
       }
+      .logo {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <div class="header">
-        <h1>E-Mwananchi – Verify Your Email</h1>
+        <div class="logo">E-Mwananchi</div>
+        <h1>Verify Your Email</h1>
       </div>
       <div class="content">
         <p>Hello {{ user.get_full_name|default:user.email }},</p>
@@ -75,7 +85,7 @@
         </p>
 
         <p>
-          This link will expire in 30 Minutes. If you didn’t create this account,
+          This link will expire in 24 hours. If you didn't create this account,
           you can safely ignore this email.
         </p>
 
