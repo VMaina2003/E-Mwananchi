@@ -42,7 +42,9 @@ INSTALLED_APPS = [
     'Reports',
     'comments',
     'notifications',
+    'corsheaders',
 ]
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -52,6 +54,23 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+]
+
+
+# CORS Settings (Add this section)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # Add your production domains later
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+# Add these for production
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 ROOT_URLCONF = 'Main.urls'
@@ -140,47 +159,6 @@ AUTH_USER_MODEL = 'Authentication.CustomUser'
 
 
 # ============================================================
-#   EMAIL SETTINGS (Updated for Reliable Testing)
-# ============================================================
-
-if DEBUG:
-    # DEVELOPMENT/TESTING CONFIGURATION
-    # Uses SMTP credentials from .env (e.g., Mailtrap) to avoid Gmail rate-limits.
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend' 
-    
-    # Load SMTP details from environment variables (Maitrap credentials)
-    EMAIL_HOST = config('EMAIL_HOST')
-    EMAIL_PORT = config('EMAIL_PORT', cast=int)
-    EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-    
-    # Security settings for most testing services
-    EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool) 
-    EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
-    
-else:
-    # PRODUCTION CONFIGURATION
-    # Ensure production environment variables point to a dedicated email service (SendGrid/Mailgun).
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    
-    # Load details from environment variables 
-    EMAIL_HOST = config('EMAIL_HOST') 
-    EMAIL_PORT = config('EMAIL_PORT', cast=int)
-    EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-
-    # Security settings
-    EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-    EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
-
-# Define the default sender address for both environments
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER) 
-
-# Ensure the server logs unhandled errors during email sending
-SERVER_EMAIL = DEFAULT_FROM_EMAIL 
-
-
-# ============================================================
 #   DJANGO REST FRAMEWORK & JWT
 # ============================================================
 
@@ -201,11 +179,13 @@ REST_FRAMEWORK = {
 
 # JWT Configuration
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
 }
 
 
@@ -214,3 +194,14 @@ SIMPLE_JWT = {
 # ============================================================
 
 GEMINI_API_KEY = config("GEMINI_API_KEY", default=None)
+
+# ============================================================
+# EMAIL CONFIG (Gmail via .env)
+# ============================================================
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = config("EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_PORT = config("EMAIL_PORT", cast=int, default=587)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool, default=True)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
