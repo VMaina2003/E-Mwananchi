@@ -55,3 +55,24 @@ Description: {description}
         "predicted_department": None,
         "predicted_county": None,
     }
+    
+def match_department(ai_department, known_departments):
+    """
+    Fuzzy match AI-predicted department with known departments
+    """
+    if not ai_department:
+        return None
+    
+    # Simple exact match first
+    if ai_department in known_departments:
+        return ai_department
+    
+    # Fuzzy matching as fallback
+    try:
+        best_match = process.extractOne(ai_department, known_departments, scorer=fuzz.token_sort_ratio)
+        if best_match and best_match[1] > 80:  # 80% similarity threshold
+            return best_match[0]
+    except:
+        pass
+    
+    return None
