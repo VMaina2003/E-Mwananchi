@@ -42,7 +42,7 @@ def verify_email_token(token):
 def send_verification_email(user, request=None):
     """Send HTML email with verification link and detailed error logging."""
     token = generate_verification_token(user)
-    # CHANGE THIS LINE - point to React frontend
+    # CHANGE THIS - point to React frontend
     verification_url = f"http://localhost:5173/verify-email?token={token}"
 
     subject = "Verify Your Email - E-Mwananchi"
@@ -81,7 +81,7 @@ def send_verification_email(user, request=None):
 def send_password_reset_email(user):
     """Send an HTML email with password reset link safely (handles Gmail errors)."""
     token = generate_password_reset_token(user)
-    # CHANGE THIS LINE - point to React frontend
+    # CHANGE THIS - point to React frontend
     reset_url = f"http://localhost:5173/reset-password?token={token}"
 
     subject = "Reset Your Password - E-Mwananchi"
@@ -110,7 +110,8 @@ def send_password_reset_email(user):
     except (BadHeaderError, SMTPException) as e:
         print(f"Password reset email failed: {e}")
         return False
-
+    
+    
 # ============================================================
 #   PASSWORD RESET UTILITIES
 # ============================================================
