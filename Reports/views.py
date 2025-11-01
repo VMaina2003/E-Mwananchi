@@ -142,14 +142,15 @@ class ReportViewSet(viewsets.ModelViewSet):
         # when using a read_only PrimaryKeyRelatedField, as it can cause conflicts.
         # data['reporter'] = request.user.id # <-- DELETE THIS LINE
 
-        # --- 6. Validate Data
+       # --- 6. Validate Data
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
 
-        # FIX FOR IntegrityError: Pass the authenticated user object to the save method
-        # This explicitly tells Django which user should be linked to the new report.
-        report = serializer.save(reporter=request.user)
+            # FIX: Pass the request context to serializer
+        serializer.context['request'] = request
 
+            # Create report - reporter is handled in serializer via context
+        report = serializer.save()
         # --- 7. Automatically mark status as verified
         if ai_result.get("verified", False):
             report.status = "verified"
