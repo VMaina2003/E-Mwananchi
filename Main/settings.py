@@ -207,3 +207,10 @@ EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool, default=True)
 EMAIL_HOST_USER = config("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# ============================================================
+# GOOGLE OAUTH CONFIGURATION
+# ============================================================
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1048826894887-ij03f5a3uninjhne5d1ue4b3tscajrd5.apps.googleusercontent.com')
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')

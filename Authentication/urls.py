@@ -14,20 +14,26 @@ from .views import (
     LogoutView,
     CurrentUserView,
     GoogleAuthView,
+    AppleAuthView,
+    SocialAuthView,
 )
 
 urlpatterns = [
-    # ==================== AUTHENTICATION ROUTES ====================
+    # ==================== USER REGISTRATION & VERIFICATION ====================
     path("register/", RegisterView.as_view(), name="register"),
     path("verify-email/", VerifyEmailView.as_view(), name="verify-email"),
     path("resend-verification/", ResendVerificationEmailView.as_view(), name="resend-verification"),
+    
+    # ==================== AUTHENTICATION ROUTES ====================
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     
-    # Social Authentication
-    path("google-auth/", GoogleAuthView.as_view(), name="google-auth"),
+    # ==================== SOCIAL AUTHENTICATION ====================
+    path("google/", GoogleAuthView.as_view(), name="google-auth"),
+    path("apple/", AppleAuthView.as_view(), name="apple-auth"),
+    path("social/", SocialAuthView.as_view(), name="social-auth"),
     
-    # ==================== PASSWORD MANAGEMENT ROUTES ====================
+    # ==================== PASSWORD MANAGEMENT ====================
     path("request-password-reset/", RequestPasswordResetView.as_view(), name="request-password-reset"),
     path("reset-password/", ResetPasswordView.as_view(), name="reset-password"),
 
@@ -36,6 +42,6 @@ urlpatterns = [
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("token/verify/", CustomTokenVerifyView.as_view(), name="token_verify"),
     
-    # ==================== USER PROFILE ROUTES ====================
+    # ==================== USER PROFILE & DATA ====================
     path("me/", CurrentUserView.as_view(), name="current-user"),
 ]

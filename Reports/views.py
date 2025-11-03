@@ -181,19 +181,18 @@ class ReportViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"ERROR: Failed to send report submission email to {request.user.email}. Error: {e}")
 
-        # --- 8B. 🔔 In-App Notification for Reporter
+      # --- 8B. In-App Notification for Reporter
         try:
-            create_notification(
-        recipient=request.user,
-        actor=request.user,
-        verb="submitted a report",
-        # DELETE this line: target=report, 
-        description=f"Your report '{report.title}' has been successfully submitted.",
-)
+             create_notification(
+              recipient=request.user,
+               actor=request.user,
+               verb="submitted a report",
+               description=f"Your report '{report.title}' has been successfully submitted.",
+               target_report=report,  # Add this line
+            )
         except Exception as e:
-            print(f"ERROR: Failed to create confirmation notification for reporter. Error: {e}")
-            
-        # --- 8C. 🔔 Notifications for County Officials
+           print(f"ERROR: Failed to create confirmation notification for reporter. Error: {e}")
+        # --- 8C.  Notifications for County Officials
         if report.county:
             try:
                 notify_county_officials(report.county, report)

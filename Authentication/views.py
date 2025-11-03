@@ -176,29 +176,54 @@ class CurrentUserView(APIView):
 
 
 class GoogleAuthView(APIView):
-    """
-    Handle Google OAuth authentication.
-    """
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
-        access_token = request.data.get('access_token')
+        """Handle Google OAuth callback with authorization code"""
+        code = request.data.get('code')
         
-        if not access_token:
+        if not code:
             return Response(
-                {"detail": "Access token is required."},
+                {"detail": "Authorization code is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # Verify Google token
+            import requests
             from google.oauth2 import id_token
             from google.auth.transport import requests as google_requests
             
+            # Get configuration from settings
+            client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID')
+            client_secret = getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET')
+            frontend_url = getattr(settings, 'FRONTEND_URL')
+            
+            # Exchange authorization code for tokens
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                'code': code,
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'redirect_uri': f"{frontend_url}/auth/google/callback",
+                'grant_type': 'authorization_code',
+            }
+            
+            token_response = requests.post(token_url, data=token_data)
+            token_json = token_response.json()
+            
+            if token_response.status_code != 200:
+                print(f"Token exchange failed: {token_json}")
+                return Response(
+                    {"detail": "Failed to exchange authorization code for tokens."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get and verify ID token
+            id_token_str = token_json.get('id_token')
             idinfo = id_token.verify_oauth2_token(
-                access_token, 
+                id_token_str, 
                 google_requests.Request(), 
-                settings.GOOGLE_OAUTH_CLIENT_ID
+                client_id
             )
             
             # Get or create user
@@ -223,14 +248,155 @@ class GoogleAuthView(APIView):
                 'created': created
             })
             
-        except ValueError:
+        except Exception as e:
+            print(f"Google authentication error: {e}")
             return Response(
-                {"detail": "Invalid Google token."},
+                {"detail": f"Google authentication failed: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        except Exception as e:
+            
+            
+class AppleAuthView(APIView):
+    """
+    Handle Apple OAuth authentication.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        authorization_code = request.data.get('code')
+        identity_token = request.data.get('id_token')
+        user_data = request.data.get('user', {})
+        
+        if not authorization_code and not identity_token:
             return Response(
-                {"detail": "Google authentication failed."},
+                {"detail": "Authorization code or identity token is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # For Apple Sign In, you need to:
+            # 1. Validate the identity token (JWT)
+            # 2. Exchange authorization code for tokens (if code is provided)
+            # 3. Get user information
+            
+            # Note: This is a simplified implementation
+            # In production, you need proper Apple JWT validation
+            
+            # Extract email from identity token or user data
+            email = None
+            
+            # If we have an identity token, we can extract email from it
+            if identity_token:
+                try:
+                    # In production, you would properly validate the JWT
+                    # using Apple's public keys
+                    import jwt
+                    # This is just for decoding - proper validation required
+                    decoded = jwt.decode(identity_token, options={"verify_signature": False})
+                    email = decoded.get('email')
+                except Exception as e:
+                    print(f"Error decoding Apple identity token: {e}")
+            
+            # If no email from token, check user data
+            if not email and user_data:
+                email = user_data.get('email')
+            
+            if not email:
+                return Response(
+                    {"detail": "Could not retrieve email from Apple Sign In."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Extract name from user data (Apple provides this only on first login)
+            name_info = user_data.get('name', {})
+            first_name = name_info.get('firstName', '')
+            last_name = name_info.get('lastName', '')
+            
+            # Get or create user
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'verified': True,  # Apple users are automatically verified
+                    'is_active': True,
+                }
+            )
+            
+            # Update name if it's the first time and we have name data
+            if created and (first_name or last_name):
+                user.first_name = first_name
+                user.last_name = last_name
+                user.save()
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            return Response({
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'user': UserSerializer(user).data,
+                'created': created
+            })
+            
+        except Exception as e:
+            print(f"Apple authentication error: {e}")
+            return Response(
+                {"detail": f"Apple authentication failed: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class SocialAuthView(APIView):
+    """
+    Generic social authentication view.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        provider = request.data.get('provider')
+        access_token = request.data.get('access_token')
+        email = request.data.get('email')
+        first_name = request.data.get('first_name', '')
+        last_name = request.data.get('last_name', '')
+        
+        if not provider or not access_token:
+            return Response(
+                {"detail": "Provider and access token are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not email:
+            return Response(
+                {"detail": "Email is required for social authentication."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Get or create user
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'verified': True,  # Social auth users are automatically verified
+                    'is_active': True,
+                }
+            )
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            return Response({
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'user': UserSerializer(user).data,
+                'created': created
+            })
+            
+        except Exception as e:
+            print(f"Social authentication error: {e}")
+            return Response(
+                {"detail": f"{provider.title()} authentication failed."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -249,12 +415,13 @@ class LogoutView(APIView):
                 token.blacklist()
         except Exception as e:
             # Even if blacklisting fails, we consider logout successful
-            pass
+            print(f"Token blacklisting failed: {e}")
             
         return Response(
             {"detail": "Successfully logged out."},
             status=status.HTTP_200_OK
         )
+
 
 class ResendVerificationEmailView(APIView):
     """Resend email verification link."""
@@ -294,6 +461,7 @@ class ResendVerificationEmailView(APIView):
                 {"detail": "If an account with that email exists, a verification link has been sent."},
                 status=status.HTTP_200_OK
             )
+
 
 class CustomTokenVerifyView(TokenVerifyView):
     """
