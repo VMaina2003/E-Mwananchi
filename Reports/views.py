@@ -116,10 +116,17 @@ class ReportViewSet(viewsets.ModelViewSet):
         if user.is_superadmin or user.is_admin:
             return queryset
         elif user.is_county_official:
-            # County officials can see reports from their county
-            return queryset.filter(county=user.county)
+            # County officials can see reports from their assigned county OR all counties if no county assigned
+            if user.county:
+                logger.info(f"County official {user.email} accessing reports for assigned county: {user.county.name}")
+                return queryset.filter(county=user.county)
+            else:
+                # Allow county officials without assigned counties to see all reports
+                logger.info(f"County official {user.email} without assigned county accessing all reports")
+                return queryset
         else:
             # Citizens can only see their own reports
+            logger.info(f"Citizen {user.email} accessing their own reports")
             return queryset.filter(reporter=user)
 
     # ------------------------------------------------------------
@@ -223,6 +230,12 @@ class ReportViewSet(viewsets.ModelViewSet):
         Custom endpoint for updating report status.
         """
         report = self.get_object()
+        
+        # Additional permission check for county officials without assigned counties
+        if request.user.is_county_official and not request.user.county:
+            logger.info(f"County official {request.user.email} without assigned county updating report {report.id} status")
+            # Allow status updates for any report since they can access all reports
+        
         serializer = self.get_serializer(report, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated_report = serializer.save()
@@ -272,8 +285,12 @@ class ReportViewSet(viewsets.ModelViewSet):
         
         # County distribution (for admins/officials)
         reports_by_county = {}
-        if user.is_superadmin or user.is_admin:
+        if user.is_superadmin or user.is_admin or (user.is_county_official and not user.county):
+            # Show county distribution for admins and county officials without assigned counties
             reports_by_county = dict(queryset.values_list('county__name').annotate(count=models.Count('id')))
+        elif user.is_county_official and user.county:
+            # For county officials with assigned counties, only show their county
+            reports_by_county = {user.county.name: queryset.filter(county=user.county).count()}
         
         # Department distribution
         reports_by_department = dict(
@@ -287,6 +304,23 @@ class ReportViewSet(viewsets.ModelViewSet):
             created_at__gte=timezone.now() - timedelta(days=7)
         ).count()
         
+        # County-specific stats for officials
+        county_specific_stats = {}
+        if user.is_county_official and user.county:
+            county_queryset = queryset.filter(county=user.county)
+            county_specific_stats = {
+                "assigned_county": user.county.name,
+                "county_total_reports": county_queryset.count(),
+                "county_verified_reports": county_queryset.filter(verified_by_ai=True).count(),
+                "county_resolved_reports": county_queryset.filter(status='resolved').count(),
+            }
+        elif user.is_county_official and not user.county:
+            county_specific_stats = {
+                "assigned_county": None,
+                "access_level": "multi_county",
+                "total_counties_accessed": len(reports_by_county)
+            }
+        
         stats_data = {
             "total_reports": total_reports,
             "verified_reports": verified_reports,
@@ -298,6 +332,7 @@ class ReportViewSet(viewsets.ModelViewSet):
             "reports_by_county": reports_by_county,
             "reports_by_department": reports_by_department,
             "recent_reports_count": recent_reports_count,
+            **county_specific_stats
         }
         
         serializer = ReportStatsSerializer(stats_data)
