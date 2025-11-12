@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background: #f9f9f9; }
+        .footer { text-align: center; padding: 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>E-Mwananchi Report Submitted</h1>
+        </div>
+        <div class="content">
+            <p>Hello {{ user.first_name }},</p>
+            <p>Your report has been successfully submitted to E-Mwananchi.</p>
+            
+            <h3>Report Details:</h3>
+            <p><strong>Title:</strong> {{ report.title }}</p>
+            <p><strong>County:</strong> {{ report.county.name }}</p>
+            <p><strong>Status:</strong> {{ report.get_status_display }}</p>
+            {% if report.verified_by_ai %}
+            <p><strong>AI Verification:</strong> Verified ({{ report.ai_confidence|floatformat:2 }} confidence)</p>
+            {% endif %}
+            
+            <p>You can track your report's progress here:</p>
+            <p><a href="{{ report_url }}">View Your Report</a></p>
+        </div>
+        <div class="footer">
+            <p>Thank you for using E-Mwananchi to improve your community!</p>
+        </div>
+    </div>
+</body>
+</html>

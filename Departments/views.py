@@ -1,5 +1,7 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
+from django_filters.rest_framework import DjangoFilterBackend
 from django.shortcuts import get_object_or_404
 
 from .models import Department, CountyDepartment, DepartmentOfficial
@@ -8,6 +10,7 @@ from .serializers import (
     CountyDepartmentSerializer,
     DepartmentOfficialSerializer,
 )
+
 
 # ============================================================
 #   CUSTOM PERMISSIONS
@@ -37,6 +40,18 @@ class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all().order_by("name")
     serializer_class = DepartmentSerializer
     permission_classes = [IsAdminOrSuperAdmin]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['name']
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def departments(self, request):
+        """
+        Public endpoint to get all departments.
+        Used by the frontend for department selection.
+        """
+        departments = Department.objects.all().order_by('name')
+        serializer = self.get_serializer(departments, many=True)
+        return Response(serializer.data)
 
 
 # ============================================================
@@ -51,6 +66,8 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
     queryset = CountyDepartment.objects.select_related("county", "department").all()
     serializer_class = CountyDepartmentSerializer
     permission_classes = [IsAdminOrSuperAdmin]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['county', 'department', 'is_active']
 
     def get_queryset(self):
         """
@@ -59,6 +76,12 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         queryset = super().get_queryset()
+        
+        # Filter by county if provided
+        county_id = self.request.query_params.get('county')
+        if county_id:
+            queryset = queryset.filter(county_id=county_id)
+            
         if user.is_authenticated and (user.is_admin or user.is_superadmin):
             return queryset
         return queryset.filter(is_active=True)
@@ -66,23 +89,6 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         """
         Allow both single and bulk creation of county departments.
-        Example of bulk data:
-        [
-            {
-                "county": "Nairobi",
-                "department": "Health",
-                "email": "health@nairobi.go.ke",
-                "phone_number": "+254700123456",
-                "office_location": "City Hall, Nairobi"
-            },
-            {
-                "county": "Mombasa",
-                "department": "Education",
-                "email": "education@mombasa.go.ke",
-                "phone_number": "+254701234567",
-                "office_location": "Tononoka, Mombasa"
-            }
-        ]
         """
         data = request.data
         if isinstance(data, list):  # Handle bulk creation
@@ -95,6 +101,16 @@ class CountyDepartmentViewSet(viewsets.ModelViewSet):
     def perform_bulk_create(self, serializer):
         """Helper to save multiple CountyDepartment records at once."""
         serializer.save()
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def active(self, request):
+        """
+        Get all active county departments.
+        """
+        county_departments = CountyDepartment.objects.filter(is_active=True).select_related('county', 'department')
+        serializer = self.get_serializer(county_departments, many=True)
+        return Response(serializer.data)
+
 
 # ============================================================
 #   DEPARTMENT OFFICIAL VIEWSET
@@ -110,6 +126,8 @@ class DepartmentOfficialViewSet(viewsets.ModelViewSet):
     queryset = DepartmentOfficial.objects.select_related("user", "county_department").all()
     serializer_class = DepartmentOfficialSerializer
     permission_classes = [IsAdminOrSuperAdmin]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['county_department', 'is_head']
 
     def get_queryset(self):
         user = self.request.user
@@ -117,4 +135,19 @@ class DepartmentOfficialViewSet(viewsets.ModelViewSet):
             return self.queryset.filter(user=user)
         elif user.is_authenticated and (user.is_admin or user.is_superadmin):
             return self.queryset
-        return DepartmentOfficial.objects.none()
+        return self.queryset.filter(county_department__is_active=True)
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def my_department(self, request):
+        """
+        Get the department official record for the current user.
+        """
+        if not request.user.is_county_official:
+            return Response(
+                {"detail": "Only county officials can access this endpoint."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        official = get_object_or_404(DepartmentOfficial, user=request.user)
+        serializer = self.get_serializer(official)
+        return Response(serializer.data)

@@ -1,34 +1,83 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.conf import settings
-from rest_framework import status, generics, permissions
+from rest_framework import status, generics, permissions, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.decorators import action
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenVerifyView
 from smtplib import SMTPException, SMTPRecipientsRefused
 
-# Import your serializers and utils
+from .models import CustomUser
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
     PasswordResetRequestSerializer,
     PasswordResetConfirmSerializer,
     UserSerializer,
+    EmailVerificationSerializer,
 )
 from .utils import (
     verify_email_token,
     send_verification_email,
     send_password_reset_email,
-    verify_password_reset_token,
 )
 
 User = get_user_model()
 
 
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    User management for admins only
+    """
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superadmin or user.is_admin:
+            return User.objects.all().select_related('county').order_by('-date_joined')
+        return User.objects.none()
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance == request.user:
+            return Response(
+                {"detail": "You cannot delete your own account."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = True
+        user.save()
+        return Response({'detail': 'User activated successfully.'})
+    
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        user = self.get_object()
+        if user == request.user:
+            return Response(
+                {"detail": "You cannot deactivate your own account."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user.is_active = False
+        user.save()
+        return Response({'detail': 'User deactivated successfully.'})
+
+
 class RegisterView(generics.CreateAPIView):
-    """
-    Handles user registration with email verification.
-    """
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -70,9 +119,6 @@ class RegisterView(generics.CreateAPIView):
 
 
 class VerifyEmailView(APIView):
-    """
-    Verify user's email through token link.
-    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -108,9 +154,6 @@ class VerifyEmailView(APIView):
 
 
 class LoginView(APIView):
-    """
-    Authenticate user and return JWT tokens.
-    """
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
@@ -123,9 +166,6 @@ class LoginView(APIView):
 
 
 class RequestPasswordResetView(generics.GenericAPIView):
-    """
-    Send password reset link to user's email.
-    """
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetRequestSerializer
     
@@ -147,9 +187,6 @@ class RequestPasswordResetView(generics.GenericAPIView):
 
 
 class ResetPasswordView(generics.GenericAPIView):
-    """
-    Confirm password reset using token and set new password.
-    """
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetConfirmSerializer
 
@@ -165,9 +202,6 @@ class ResetPasswordView(generics.GenericAPIView):
 
 
 class CurrentUserView(APIView):
-    """
-    Get current authenticated user data.
-    """
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
@@ -179,7 +213,6 @@ class GoogleAuthView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
-        """Handle Google OAuth callback with authorization code"""
         code = request.data.get('code')
         
         if not code:
@@ -193,12 +226,10 @@ class GoogleAuthView(APIView):
             from google.oauth2 import id_token
             from google.auth.transport import requests as google_requests
             
-            # Get configuration from settings
-            client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID')
-            client_secret = getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET')
-            frontend_url = getattr(settings, 'FRONTEND_URL')
+            client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
+            client_secret = getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', '')
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
             
-            # Exchange authorization code for tokens
             token_url = "https://oauth2.googleapis.com/token"
             token_data = {
                 'code': code,
@@ -212,13 +243,11 @@ class GoogleAuthView(APIView):
             token_json = token_response.json()
             
             if token_response.status_code != 200:
-                print(f"Token exchange failed: {token_json}")
                 return Response(
                     {"detail": "Failed to exchange authorization code for tokens."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get and verify ID token
             id_token_str = token_json.get('id_token')
             idinfo = id_token.verify_oauth2_token(
                 id_token_str, 
@@ -226,7 +255,6 @@ class GoogleAuthView(APIView):
                 client_id
             )
             
-            # Get or create user
             email = idinfo['email']
             user, created = User.objects.get_or_create(
                 email=email,
@@ -238,7 +266,6 @@ class GoogleAuthView(APIView):
                 }
             )
             
-            # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             
             return Response({
@@ -251,15 +278,12 @@ class GoogleAuthView(APIView):
         except Exception as e:
             print(f"Google authentication error: {e}")
             return Response(
-                {"detail": f"Google authentication failed: {str(e)}"},
+                {"detail": "Google authentication failed."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-            
-            
+
+
 class AppleAuthView(APIView):
-    """
-    Handle Apple OAuth authentication.
-    """
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
@@ -274,30 +298,16 @@ class AppleAuthView(APIView):
             )
 
         try:
-            # For Apple Sign In, you need to:
-            # 1. Validate the identity token (JWT)
-            # 2. Exchange authorization code for tokens (if code is provided)
-            # 3. Get user information
-            
-            # Note: This is a simplified implementation
-            # In production, you need proper Apple JWT validation
-            
-            # Extract email from identity token or user data
             email = None
             
-            # If we have an identity token, we can extract email from it
             if identity_token:
                 try:
-                    # In production, you would properly validate the JWT
-                    # using Apple's public keys
                     import jwt
-                    # This is just for decoding - proper validation required
                     decoded = jwt.decode(identity_token, options={"verify_signature": False})
                     email = decoded.get('email')
                 except Exception as e:
                     print(f"Error decoding Apple identity token: {e}")
             
-            # If no email from token, check user data
             if not email and user_data:
                 email = user_data.get('email')
             
@@ -307,29 +317,25 @@ class AppleAuthView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Extract name from user data (Apple provides this only on first login)
             name_info = user_data.get('name', {})
             first_name = name_info.get('firstName', '')
             last_name = name_info.get('lastName', '')
             
-            # Get or create user
             user, created = User.objects.get_or_create(
                 email=email,
                 defaults={
                     'first_name': first_name,
                     'last_name': last_name,
-                    'verified': True,  # Apple users are automatically verified
+                    'verified': True,
                     'is_active': True,
                 }
             )
             
-            # Update name if it's the first time and we have name data
             if created and (first_name or last_name):
                 user.first_name = first_name
                 user.last_name = last_name
                 user.save()
             
-            # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             
             return Response({
@@ -342,14 +348,12 @@ class AppleAuthView(APIView):
         except Exception as e:
             print(f"Apple authentication error: {e}")
             return Response(
-                {"detail": f"Apple authentication failed: {str(e)}"},
+                {"detail": "Apple authentication failed."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+
 class SocialAuthView(APIView):
-    """
-    Generic social authentication view.
-    """
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
@@ -372,18 +376,16 @@ class SocialAuthView(APIView):
             )
         
         try:
-            # Get or create user
             user, created = User.objects.get_or_create(
                 email=email,
                 defaults={
                     'first_name': first_name,
                     'last_name': last_name,
-                    'verified': True,  # Social auth users are automatically verified
+                    'verified': True,
                     'is_active': True,
                 }
             )
             
-            # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             
             return Response({
@@ -402,9 +404,6 @@ class SocialAuthView(APIView):
 
 
 class LogoutView(APIView):
-    """
-    Handle user logout with token blacklisting.
-    """
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
@@ -414,7 +413,6 @@ class LogoutView(APIView):
                 token = RefreshToken(refresh_token)
                 token.blacklist()
         except Exception as e:
-            # Even if blacklisting fails, we consider logout successful
             print(f"Token blacklisting failed: {e}")
             
         return Response(
@@ -424,7 +422,6 @@ class LogoutView(APIView):
 
 
 class ResendVerificationEmailView(APIView):
-    """Resend email verification link."""
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
@@ -456,7 +453,6 @@ class ResendVerificationEmailView(APIView):
                 )
                 
         except User.DoesNotExist:
-            # Don't reveal whether email exists
             return Response(
                 {"detail": "If an account with that email exists, a verification link has been sent."},
                 status=status.HTTP_200_OK
@@ -464,7 +460,4 @@ class ResendVerificationEmailView(APIView):
 
 
 class CustomTokenVerifyView(TokenVerifyView):
-    """
-    Verify JWT token validity.
-    """
     permission_classes = [permissions.AllowAny]

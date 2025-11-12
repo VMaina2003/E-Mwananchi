@@ -18,7 +18,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.56.1', '192.168.100.6']
 
 
 # ============================================================
@@ -36,17 +36,19 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'django_filters', 
     'cloudinary',
+    'corsheaders',  # Moved to top for proper middleware order
     'Authentication',
     'Location',
     'Departments',
     'Reports',
     'comments',
     'notifications',
-    'corsheaders',
+    'Dashboard',
 ]
 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # Moved to top
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -54,25 +56,55 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
 ]
 
 
-# CORS Settings (Add this section)
+# ============================================================
+# CORS & SECURITY SETTINGS
+# ============================================================
+
+# CORS Settings
 CORS_ALLOWED_ORIGINS = [
-     "http://localhost:5173",
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
-     "http://localhost:2222", 
-    # Add your production domains later
+    "http://localhost:2222",
+    "http://192.168.56.1:5173",
+    "http://192.168.100.6:5173",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 
-# Add these for production
+# More permissive CORS settings for development
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only in development
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# CSRF Settings
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:2222",
+    "http://192.168.56.1:5173",
+    "http://192.168.100.6:5173",
 ]
 
 ROOT_URLCONF = 'Main.urls'
@@ -169,19 +201,22 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.IsAuthenticated',  # Default to authenticated
     ),
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
 
 
 # JWT Configuration
 SIMPLE_JWT = {
-     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
@@ -214,3 +249,34 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1048826894887-ij03f5a3uninjhne5d1ue4b3tscajrd5.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+
+# ============================================================
+# LOGGING CONFIGURATION
+# ============================================================
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# ============================================================
+#   MEDIA FILES (User uploaded files)
+# ============================================================
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+

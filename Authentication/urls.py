@@ -1,4 +1,6 @@
-from django.urls import path
+# Authentication/urls.py
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
@@ -16,7 +18,12 @@ from .views import (
     GoogleAuthView,
     AppleAuthView,
     SocialAuthView,
+    UserViewSet,  # ADD THIS IMPORT
 )
+
+# ADD THIS ROUTER
+router = DefaultRouter()
+router.register(r'users', UserViewSet, basename='users')
 
 urlpatterns = [
     # ==================== USER REGISTRATION & VERIFICATION ====================
@@ -44,4 +51,7 @@ urlpatterns = [
     
     # ==================== USER PROFILE & DATA ====================
     path("me/", CurrentUserView.as_view(), name="current-user"),
+    
+    # ==================== USER MANAGEMENT (ADD THIS) ====================
+    path('', include(router.urls)),  # This adds /api/auth/users/ endpoints
 ]

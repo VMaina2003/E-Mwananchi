@@ -1,5 +1,6 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -17,6 +18,7 @@ class UserSerializer(serializers.ModelSerializer):
     Standard serializer for user data with role display.
     """
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    county_name = serializers.CharField(source='county.name', read_only=True)
     
     class Meta:
         model = User
@@ -27,14 +29,19 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "role",
             "role_display",
+            "county",
+            "county_name",
             "verified",
             "is_active",
+            "is_staff",
+            "is_superuser",
             "date_joined",
-            "county",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = [
             "id", "verified", "is_active", "date_joined", 
-            "role", "role_display", "county"
+            "created_at", "updated_at", "role_display", "county_name"
         ]
 
 
