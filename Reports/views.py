@@ -1,3 +1,4 @@
+# Reports/views.py - UPDATED
 import logging
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
@@ -9,14 +10,16 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags 
 import requests
 
-from .models import Report, ReportImage
+from .models import Report, ReportImage, GovernmentDevelopment
 from .serializers import (
     ReportSerializer, 
     ReportStatusUpdateSerializer,
     ReportListSerializer,
     ReportDetailSerializer,
     ReportImageUploadSerializer,
-    ReportStatsSerializer
+    ReportStatsSerializer,
+    GovernmentDevelopmentSerializer,
+    GovernmentDevelopmentProgressSerializer
 )
 from Authentication.models import CustomUser
 from Location.models import County, SubCounty, Ward
@@ -34,6 +37,7 @@ class IsAuthenticatedAndHasRole(permissions.BasePermission):
     """Allows only authenticated users with valid roles."""
     allowed_roles = [
         CustomUser.Roles.CITIZEN,
+        CustomUser.Roles.VIEWER,
         CustomUser.Roles.COUNTY_OFFICIAL,
         CustomUser.Roles.ADMIN,
         CustomUser.Roles.SUPERADMIN,
@@ -76,7 +80,7 @@ class CanUploadImages(permissions.BasePermission):
 
 
 # ============================================================
-# REPORT VIEWSET
+# REPORT VIEWSET - FIXED FOR BROWSE VS MY REPORTS
 # ============================================================
 class ReportViewSet(viewsets.ModelViewSet):
     """
@@ -84,12 +88,12 @@ class ReportViewSet(viewsets.ModelViewSet):
     """
     queryset = Report.objects.all().select_related(
         "reporter", "county", "subcounty", "ward", "department", "department__department"
-    ).prefetch_related("images")
+    ).prefetch_related("images", "likes")
     permission_classes = [IsAuthenticatedAndHasRole]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["status", "county", "department", "verified_by_ai", "reporter"]
+    filterset_fields = ["status", "county", "department", "verified_by_ai"]
     search_fields = ["title", "description", "county__name", "department__department__name"]
-    ordering_fields = ["created_at", "updated_at", "ai_confidence", "status"]
+    ordering_fields = ["created_at", "updated_at", "ai_confidence", "status", "likes_count", "views_count"]
     ordering = ["-created_at"]
 
     def get_serializer_class(self):
@@ -109,10 +113,23 @@ class ReportViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Filter queryset based on user role and permissions.
+        FIXED: Browse Reports shows ALL reports, My Reports shows user's reports only
         """
         user = self.request.user
         queryset = self.queryset
 
+        # Check if this is a "my_reports" request
+        my_reports = self.request.query_params.get('my_reports', 'false').lower() == 'true'
+        reporter_filter = self.request.query_params.get('reporter')
+
+        if my_reports or reporter_filter:
+            # For "My Reports" or specific reporter filter - show only user's reports
+            if reporter_filter:
+                return queryset.filter(reporter_id=reporter_filter)
+            else:
+                return queryset.filter(reporter=user)
+        
+        # For Browse Reports - show ALL reports based on user permissions
         if user.is_superadmin or user.is_admin:
             return queryset
         elif user.is_county_official:
@@ -125,9 +142,9 @@ class ReportViewSet(viewsets.ModelViewSet):
                 logger.info(f"County official {user.email} without assigned county accessing all reports")
                 return queryset
         else:
-            # Citizens can only see their own reports
-            logger.info(f"Citizen {user.email} accessing their own reports")
-            return queryset.filter(reporter=user)
+            # Citizens and viewers can see ALL reports (not just their own) for browsing
+            logger.info(f"User {user.email} accessing all reports for browsing")
+            return queryset
 
     # ------------------------------------------------------------
     # LIST ACTION (Optimized for performance)
@@ -183,7 +200,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         # --- 6. Validate and Create Report ---
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        report = serializer.save()
+        report = serializer.save(reporter=request.user)
 
         # --- 7. Post-Creation Processing ---
         self._handle_post_creation_actions(request, report, ai_confidence)
@@ -191,38 +208,75 @@ class ReportViewSet(viewsets.ModelViewSet):
         return Response(ReportDetailSerializer(report).data, status=status.HTTP_201_CREATED)
 
     # ------------------------------------------------------------
-    # UPDATE REPORT
+    # CUSTOM ACTIONS - ADD LIKE/UNLIKE FUNCTIONALITY
     # ------------------------------------------------------------
-    def update(self, request, *args, **kwargs):
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticatedAndHasRole])
+    def like(self, request, pk=None):
         """
-        Update report with permission checks.
+        Like a report.
         """
-        instance = self.get_object()
-        logger.info(f"Updating report: {instance.id}")
-        
-        # Check for status update attempts
-        if 'status' in request.data:
-            return self._handle_status_update(request, instance)
+        report = self.get_object()
+        if report.like(request.user):
+            return Response({
+                "detail": "Report liked successfully.", 
+                "likes_count": report.likes_count
+            })
+        return Response({"detail": "Report already liked."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Handle standard report updates
-        if not instance.is_editable_by_reporter():
-            logger.warning(f"User {request.user.email} attempted to edit non-editable report {instance.id}")
-            return Response(
-                {"detail": "This report cannot be edited after verification."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticatedAndHasRole])
+    def unlike(self, request, pk=None):
+        """
+        Unlike a report.
+        """
+        report = self.get_object()
+        if report.unlike(request.user):
+            return Response({
+                "detail": "Report unliked successfully.", 
+                "likes_count": report.likes_count
+            })
+        return Response({"detail": "Report not liked."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check object permissions for standard updates
-        self.check_object_permissions(request, instance)
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        updated_report = serializer.save()
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticatedAndHasRole])
+    def increment_views(self, request, pk=None):
+        """
+        Increment report view count.
+        """
+        report = self.get_object()
+        report.increment_views()
+        return Response({
+            "detail": "View count incremented.", 
+            "views_count": report.views_count
+        })
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticatedAndHasRole])
+    def likes(self, request, pk=None):
+        """
+        Get users who liked this report.
+        """
+        report = self.get_object()
+        likes = report.likes.all()
+        from Authentication.serializers import UserSerializer
+        serializer = UserSerializer(likes, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticatedAndHasRole])
+    def my_reports(self, request):
+        """
+        Get only the current user's reports.
+        """
+        queryset = self.get_queryset().filter(reporter=request.user)
+        queryset = self.filter_queryset(queryset)
         
-        logger.info(f"Report {instance.id} updated successfully")
-        return Response(ReportDetailSerializer(updated_report).data)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+            
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     # ------------------------------------------------------------
-    # CUSTOM ACTIONS
+    # EXISTING METHODS (keep the same)
     # ------------------------------------------------------------
     @action(detail=True, methods=['post'], permission_classes=[CanUpdateStatus])
     def update_status(self, request, pk=None):
@@ -280,6 +334,10 @@ class ReportViewSet(viewsets.ModelViewSet):
         reports_with_images = queryset.filter(image_required_passed=True).count()
         ai_verified_reports = queryset.filter(verified_by_ai=True).count()
         
+        # User-specific stats
+        user_reports_count = queryset.filter(reporter=user).count()
+        user_resolved_reports = queryset.filter(reporter=user, status='resolved').count()
+        
         # Status distribution
         reports_by_status = dict(queryset.values_list('status').annotate(count=models.Count('id')))
         
@@ -328,6 +386,8 @@ class ReportViewSet(viewsets.ModelViewSet):
             "rejected_reports": rejected_reports,
             "reports_with_images": reports_with_images,
             "ai_verified_reports": ai_verified_reports,
+            "user_reports_count": user_reports_count,
+            "user_resolved_reports": user_resolved_reports,
             "reports_by_status": reports_by_status,
             "reports_by_county": reports_by_county,
             "reports_by_department": reports_by_department,
@@ -339,7 +399,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     # ------------------------------------------------------------
-    # PRIVATE HELPER METHODS
+    # PRIVATE HELPER METHODS (keep the same)
     # ------------------------------------------------------------
     def _enrich_location_data(self, data, lat, lon):
         """Try to enrich location data with county, subcounty, ward information."""
@@ -502,3 +562,147 @@ class ReportViewSet(viewsets.ModelViewSet):
             logger.info(f"Notified county officials for {report.county.name}")
         except Exception as e:
             logger.error(f"Failed to notify county officials: {e}")
+
+# ============================================================
+# GOVERNMENT DEVELOPMENT VIEWSET (keep the same)
+# ============================================================
+class GovernmentDevelopmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling government development projects.
+    """
+    queryset = GovernmentDevelopment.objects.all().select_related(
+        "county", "department", "department__department", "created_by"
+    ).prefetch_related("images", "likes")
+    serializer_class = GovernmentDevelopmentSerializer
+    permission_classes = [IsAuthenticatedAndHasRole]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["status", "county", "department"]
+    search_fields = ["title", "description", "county__name", "department__department__name"]
+    ordering_fields = ["created_at", "updated_at", "progress_percentage", "start_date"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        """
+        Filter queryset based on user permissions.
+        """
+        user = self.request.user
+        queryset = self.queryset
+
+        # Admins and superadmins can see all projects
+        if user.is_superadmin or user.is_admin:
+            return queryset
+        
+        # County officials can see projects from their assigned county OR all counties if no county assigned
+        elif user.is_county_official:
+            if user.county:
+                return queryset.filter(county=user.county)
+            else:
+                return queryset
+        
+        # Citizens and viewers can see all active projects
+        else:
+            return queryset.filter(status__in=["planned", "in_progress", "completed"])
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new government development project.
+        Only admins and county officials can create projects.
+        """
+        if not (request.user.is_superadmin or request.user.is_admin or request.user.is_county_official):
+            return Response(
+                {"detail": "You don't have permission to create government projects."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        data = request.data.copy()
+        data["created_by"] = request.user.id
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        development = serializer.save()
+        
+        logger.info(f"Government development project created: {development.title}")
+        return Response(GovernmentDevelopmentSerializer(development).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def update_progress(self, request, pk=None):
+        """
+        Update project progress percentage and status.
+        """
+        development = self.get_object()
+        
+        # Check permissions
+        if not (request.user.is_superadmin or request.user.is_admin or 
+                (request.user.is_county_official and request.user.county == development.county)):
+            return Response(
+                {"detail": "You don't have permission to update this project."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        progress_percentage = request.data.get('progress_percentage')
+        update_text = request.data.get('progress_updates')
+        
+        try:
+            development.update_progress(progress_percentage, update_text)
+            logger.info(f"Project {development.id} progress updated to {progress_percentage}%")
+            return Response(GovernmentDevelopmentSerializer(development).data)
+        except ValidationError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def like(self, request, pk=None):
+        """
+        Like a government development project.
+        """
+        development = self.get_object()
+        if development.like(request.user):
+            return Response({"detail": "Project liked successfully.", "likes_count": development.likes_count})
+        return Response({"detail": "Project already liked."}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def unlike(self, request, pk=None):
+        """
+        Unlike a government development project.
+        """
+        development = self.get_object()
+        if development.unlike(request.user):
+            return Response({"detail": "Project unliked successfully.", "likes_count": development.likes_count})
+        return Response({"detail": "Project not liked."}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def increment_views(self, request, pk=None):
+        """
+        Increment project view count.
+        """
+        development = self.get_object()
+        development.increment_views()
+        return Response({"detail": "View count incremented.", "views_count": development.views_count})
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """
+        Get government development statistics.
+        """
+        user = request.user
+        queryset = self.get_queryset()
+        
+        stats = {
+            "total_projects": queryset.count(),
+            "planned_projects": queryset.filter(status="planned").count(),
+            "in_progress_projects": queryset.filter(status="in_progress").count(),
+            "completed_projects": queryset.filter(status="completed").count(),
+            "delayed_projects": queryset.filter(status="delayed").count(),
+            "total_budget": float(queryset.aggregate(total=models.Sum('budget'))['total'] or 0),
+            "average_progress": queryset.aggregate(avg=models.Avg('progress_percentage'))['avg'] or 0,
+        }
+        
+        # County-specific stats for officials
+        if user.is_county_official and user.county:
+            county_queryset = queryset.filter(county=user.county)
+            stats.update({
+                "county_total_projects": county_queryset.count(),
+                "county_budget": float(county_queryset.aggregate(total=models.Sum('budget'))['total'] or 0),
+                "county_completed_projects": county_queryset.filter(status="completed").count(),
+            })
+        
+        return Response(stats)

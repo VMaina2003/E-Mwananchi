@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Report, ReportImage, ReportStatusChoices
+from .models import Report, ReportImage, GovernmentDevelopment, ReportStatusChoices
+from Authentication.models import CustomUser
 from Location.models import County, SubCounty, Ward
 from Departments.models import CountyDepartment
 
@@ -46,13 +47,14 @@ class ReportImageUploadSerializer(serializers.ModelSerializer):
 class ReportListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing reports with optimized queries."""
     
-    reporter_name = serializers.CharField(source="reporter.get_full_name", read_only=True)
+    reporter_name = serializers.CharField(source="reporter.first_name", read_only=True)
     county_name = serializers.CharField(source="county.name", read_only=True)
     department_name = serializers.CharField(source="department.department.name", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     image_count = serializers.SerializerMethodField()
     has_images = serializers.SerializerMethodField()
-
+    current_user_liked = serializers.SerializerMethodField()
+    
     class Meta:
         model = Report
         fields = [
@@ -68,7 +70,11 @@ class ReportListSerializer(serializers.ModelSerializer):
             "image_required_passed",
             "created_at",
             "image_count",
-            "has_images"
+            "has_images",
+            "likes_count",
+            "comments_count",
+            "views_count",
+            "current_user_liked"
         ]
         read_only_fields = fields
 
@@ -77,6 +83,12 @@ class ReportListSerializer(serializers.ModelSerializer):
 
     def get_has_images(self, obj):
         return obj.images.exists()
+    
+    def get_current_user_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(id=request.user.id).exists()
+        return False
 
 
 # ============================================================
@@ -86,12 +98,13 @@ class ReportDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for single report view."""
     
     images = ReportImageSerializer(many=True, read_only=True)
-    reporter_name = serializers.CharField(source="reporter.get_full_name", read_only=True)
+    reporter_name = serializers.CharField(source="reporter.first_name", read_only=True)
     county_name = serializers.CharField(source="county.name", read_only=True)
     subcounty_name = serializers.CharField(source="subcounty.name", read_only=True, allow_null=True)
     ward_name = serializers.CharField(source="ward.name", read_only=True, allow_null=True)
     department_name = serializers.CharField(source="department.department.name", read_only=True, allow_null=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    current_user_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = Report
@@ -120,6 +133,14 @@ class ReportDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "images",
+            "likes_count",
+            "comments_count",
+            "views_count",
+            "current_user_liked",
+            "government_response",
+            "response_date",
+            "responded_by",
+            "is_development_showcase"
         ]
         read_only_fields = [
             "id",
@@ -130,7 +151,16 @@ class ReportDetailSerializer(serializers.ModelSerializer):
             "image_required_passed",
             "created_at",
             "updated_at",
+            "likes_count",
+            "comments_count",
+            "views_count",
         ]
+    
+    def get_current_user_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(id=request.user.id).exists()
+        return False
 
 
 # ============================================================
@@ -159,10 +189,11 @@ class ReportSerializer(serializers.ModelSerializer):
     )
     
     # Read-only display fields
-    reporter_name = serializers.CharField(source="reporter.get_full_name", read_only=True)
+    reporter_name = serializers.CharField(source="reporter.first_name", read_only=True)
     county_name = serializers.CharField(source="county.name", read_only=True)
     department_name = serializers.CharField(source="department.department.name", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    current_user_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = Report
@@ -190,6 +221,10 @@ class ReportSerializer(serializers.ModelSerializer):
             "updated_at",
             "images",
             "new_images",
+            "likes_count",
+            "comments_count",
+            "views_count",
+            "current_user_liked"
         ]
         read_only_fields = [
             "id",
@@ -200,7 +235,16 @@ class ReportSerializer(serializers.ModelSerializer):
             "image_required_passed",
             "created_at",
             "updated_at",
+            "likes_count",
+            "comments_count",
+            "views_count",
         ]
+
+    def get_current_user_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(id=request.user.id).exists()
+        return False
 
     # --------------------------------------------------------
     #   VALIDATION LOGIC
@@ -356,6 +400,8 @@ class ReportStatsSerializer(serializers.Serializer):
     rejected_reports = serializers.IntegerField()
     reports_with_images = serializers.IntegerField()
     ai_verified_reports = serializers.IntegerField()
+    user_reports_count = serializers.IntegerField()
+    user_resolved_reports = serializers.IntegerField()
     reports_by_status = serializers.DictField()
     reports_by_county = serializers.DictField()
     reports_by_department = serializers.DictField()
@@ -368,10 +414,76 @@ class ReportStatsSerializer(serializers.Serializer):
 class ReportMinimalSerializer(serializers.ModelSerializer):
     """Minimal serializer for dropdowns and autocomplete fields."""
     
-    reporter_name = serializers.CharField(source="reporter.get_full_name", read_only=True)
+    reporter_name = serializers.CharField(source="reporter.first_name", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Report
         fields = ["id", "title", "reporter_name", "status", "status_display", "created_at"]
         read_only_fields = fields
+
+
+# ============================================================
+#   GOVERNMENT DEVELOPMENT SERIALIZERS
+# ============================================================
+class GovernmentDevelopmentSerializer(serializers.ModelSerializer):
+    """Serializer for Government Development projects."""
+    county_name = serializers.CharField(source='county.name', read_only=True)
+    department_name = serializers.CharField(source='department.department.name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
+    days_remaining = serializers.ReadOnlyField()
+    is_overdue = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = GovernmentDevelopment
+        fields = [
+            'id', 'title', 'description', 'county', 'county_name', 'department', 'department_name',
+            'budget', 'start_date', 'expected_completion', 'actual_completion', 'status',
+            'progress_percentage', 'progress_updates', 'likes_count', 'comments_count', 'views_count',
+            'created_by', 'created_by_name', 'created_at', 'updated_at', 'is_liked',
+            'days_remaining', 'is_overdue'
+        ]
+        read_only_fields = ['created_by', 'created_at', 'updated_at', 'likes_count', 'comments_count', 'views_count']
+
+    def get_created_by_name(self, obj):
+        return f"{obj.created_by.first_name} {obj.created_by.last_name}"
+
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(id=request.user.id).exists()
+        return False
+
+    def validate_budget(self, value):
+        if value and value < 0:
+            raise serializers.ValidationError("Budget cannot be negative.")
+        return value
+
+    def validate_start_date(self, value):
+        if value and value < timezone.now().date():
+            raise serializers.ValidationError("Start date cannot be in the past.")
+        return value
+
+    def validate(self, data):
+        expected_completion = data.get('expected_completion')
+        start_date = data.get('start_date')
+        
+        if expected_completion and start_date and expected_completion < start_date:
+            raise serializers.ValidationError({
+                "expected_completion": "Expected completion date cannot be before start date."
+            })
+        
+        return data
+
+
+class GovernmentDevelopmentProgressSerializer(serializers.ModelSerializer):
+    """Serializer for updating project progress."""
+    class Meta:
+        model = GovernmentDevelopment
+        fields = ['progress_percentage', 'progress_updates']
+
+    def validate_progress_percentage(self, value):
+        if not (0 <= value <= 100):
+            raise serializers.ValidationError("Progress percentage must be between 0 and 100.")
+        return value

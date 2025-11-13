@@ -280,7 +280,7 @@ class Report(models.Model):
         """Like this report."""
         if not self.likes.filter(id=user.id).exists():
             self.likes.add(user)
-            self.likes_count += 1
+            self.likes_count = self.likes.count()
             self.save(update_fields=["likes_count"])
             return True
         return False
@@ -289,7 +289,7 @@ class Report(models.Model):
         """Unlike this report."""
         if self.likes.filter(id=user.id).exists():
             self.likes.remove(user)
-            self.likes_count = max(0, self.likes_count - 1)
+            self.likes_count = self.likes.count()
             self.save(update_fields=["likes_count"])
             return True
         return False
@@ -450,7 +450,7 @@ class GovernmentDevelopment(models.Model):
         """Like this development."""
         if not self.likes.filter(id=user.id).exists():
             self.likes.add(user)
-            self.likes_count += 1
+            self.likes_count = self.likes.count()
             self.save(update_fields=["likes_count"])
             return True
         return False
@@ -459,7 +459,7 @@ class GovernmentDevelopment(models.Model):
         """Unlike this development."""
         if self.likes.filter(id=user.id).exists():
             self.likes.remove(user)
-            self.likes_count = max(0, self.likes_count - 1)
+            self.likes_count = self.likes.count()
             self.save(update_fields=["likes_count"])
             return True
         return False
@@ -494,47 +494,3 @@ class GovernmentDevelopment(models.Model):
         
         if self.budget and self.budget < 0:
             raise ValidationError("Budget cannot be negative.")
-
-
-# ============================================================
-#   REPORT LIKE MODEL (For tracking likes with timestamps)
-# ============================================================
-class ReportLike(models.Model):
-    """
-    Track report likes with timestamps for analytics.
-    """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    report = models.ForeignKey(Report, on_delete=models.CASCADE, related_name="like_instances")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ['user', 'report']
-        ordering = ['-created_at']
-        verbose_name = "Report Like"
-        verbose_name_plural = "Report Likes"
-
-    def __str__(self):
-        return f"{self.user.email} liked {self.report.title}"
-
-
-# ============================================================
-#   DEVELOPMENT LIKE MODEL (For tracking development likes with timestamps)
-# ============================================================
-class DevelopmentLike(models.Model):
-    """
-    Track development project likes with timestamps for analytics.
-    """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    development = models.ForeignKey(GovernmentDevelopment, on_delete=models.CASCADE, related_name="like_instances")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ['user', 'development']
-        ordering = ['-created_at']
-        verbose_name = "Development Like"
-        verbose_name_plural = "Development Likes"
-
-    def __str__(self):
-        return f"{self.user.email} liked {self.development.title}"
