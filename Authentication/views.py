@@ -208,54 +208,75 @@ class CurrentUserView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
-
 class GoogleAuthView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
+        # Accept both 'token' (from frontend) and 'code' (alternative)
+        token = request.data.get('token')
         code = request.data.get('code')
         
-        if not code:
+        if not token and not code:
             return Response(
-                {"detail": "Authorization code is required."},
+                {"detail": "Google token or code is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            import requests
             from google.oauth2 import id_token
             from google.auth.transport import requests as google_requests
             
             client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
-            client_secret = getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', '')
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
             
-            token_url = "https://oauth2.googleapis.com/token"
-            token_data = {
-                'code': code,
-                'client_id': client_id,
-                'client_secret': client_secret,
-                'redirect_uri': f"{frontend_url}/auth/google/callback",
-                'grant_type': 'authorization_code',
-            }
+            # Use token if provided, otherwise try to exchange code for token
+            if token:
+                # Verify the ID token directly
+                idinfo = id_token.verify_oauth2_token(
+                    token, 
+                    google_requests.Request(), 
+                    client_id
+                )
+            else:
+                # Handle authorization code flow
+                import requests
+                token_url = "https://oauth2.googleapis.com/token"
+                token_data = {
+                    'code': code,
+                    'client_id': client_id,
+                    'client_secret': getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', ''),
+                    'redirect_uri': f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')}/auth/google/callback",
+                    'grant_type': 'authorization_code',
+                }
+                
+                token_response = requests.post(token_url, data=token_data)
+                token_json = token_response.json()
+                
+                if token_response.status_code != 200:
+                    return Response(
+                        {"detail": "Failed to exchange authorization code for tokens."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                id_token_str = token_json.get('id_token')
+                idinfo = id_token.verify_oauth2_token(
+                    id_token_str, 
+                    google_requests.Request(), 
+                    client_id
+                )
             
-            token_response = requests.post(token_url, data=token_data)
-            token_json = token_response.json()
+            # Validate the token
+            if idinfo['aud'] != client_id:
+                raise ValueError('Invalid token audience')
             
-            if token_response.status_code != 200:
+            email = idinfo['email']
+            email_verified = idinfo.get('email_verified', False)
+            
+            if not email_verified:
                 return Response(
-                    {"detail": "Failed to exchange authorization code for tokens."},
+                    {"detail": "Google email not verified."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            id_token_str = token_json.get('id_token')
-            idinfo = id_token.verify_oauth2_token(
-                id_token_str, 
-                google_requests.Request(), 
-                client_id
-            )
-            
-            email = idinfo['email']
             user, created = User.objects.get_or_create(
                 email=email,
                 defaults={
@@ -275,14 +296,18 @@ class GoogleAuthView(APIView):
                 'created': created
             })
             
+        except ValueError as e:
+            print(f"Google token validation error: {e}")
+            return Response(
+                {"detail": "Invalid Google token."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
             print(f"Google authentication error: {e}")
             return Response(
                 {"detail": "Google authentication failed."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-
 class AppleAuthView(APIView):
     permission_classes = [permissions.AllowAny]
     

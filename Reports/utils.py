@@ -65,19 +65,20 @@ IMPORTANT:
 """
 
     models_to_try = [
-        "models/gemini-1.5-pro",
-        "models/gemini-1.5-flash", 
-        "models/gemini-1.0-pro"
+        "gemini-1.5-pro",
+        "gemini-1.5-flash", 
+        "gemini-1.0-pro"
     ]
 
     for model_name in models_to_try:
         try:
             logger.info(f"Attempting AI classification with {model_name}")
             
+            # FIXED: Use the correct API format for the new Gemini client
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
-                generation_config={
+                config={
                     "temperature": 0.1,
                     "max_output_tokens": 500,
                 },

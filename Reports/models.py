@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
+from cloudinary.models import CloudinaryField
 from Location.models import County, SubCounty, Ward
 from Departments.models import CountyDepartment
 
@@ -36,11 +37,11 @@ class DevelopmentStatusChoices(models.TextChoices):
 
 
 # ============================================================
-#   REPORT IMAGE MODEL
+#   REPORT IMAGE MODEL (UPDATED WITH CLOUDINARY)
 # ============================================================
 class ReportImage(models.Model):
     """
-    Stores images related to a report.
+    Stores images related to a report using Cloudinary.
     A report can have multiple images uploaded by the user as proof.
     """
 
@@ -51,8 +52,13 @@ class ReportImage(models.Model):
         related_name="images",
         help_text="Report this image belongs to."
     )
-    image = models.ImageField(
-        upload_to="report_images/",
+    image = CloudinaryField(
+        'image',
+        folder='e_mwananchi/report_images/',
+        transformation=[
+            {'quality': 'auto:good'},
+            {'format': 'webp'},
+        ],
         help_text="Uploaded image (from camera or gallery)."
     )
     caption = models.CharField(
@@ -70,9 +76,35 @@ class ReportImage(models.Model):
     def __str__(self):
         return f"Image for {self.report.title}"
 
+    @property
+    def image_url(self):
+        """Get optimized image URL with transformations"""
+        if self.image:
+            return self.image.build_url(
+                quality='auto:good',
+                format='webp',
+                width=800,
+                crop='limit'
+            )
+        return None
+
+    @property
+    def thumbnail_url(self):
+        """Get thumbnail URL"""
+        if self.image:
+            return self.image.build_url(
+                quality='auto:good',
+                format='webp',
+                width=300,
+                height=200,
+                crop='fill',
+                gravity='auto'
+            )
+        return None
+
 
 # ============================================================
-#   REPORT MODEL (UPDATED WITH SOCIAL FEATURES)
+#   REPORT MODEL (COMPLETE VERSION WITH ALL FEATURES)
 # ============================================================
 class Report(models.Model):
     """
@@ -87,6 +119,7 @@ class Report(models.Model):
     - AI-based verification and confidence score
     - Social engagement features (likes, comments, views)
     - Government response system
+    - Anonymous reporting support
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -101,6 +134,22 @@ class Report(models.Model):
     role_at_submission = models.CharField(
         max_length=32,
         help_text="Snapshot of the reporter's role when submitting (e.g. citizen)."
+    )
+
+    # --- ANONYMOUS REPORTING FIELDS ---
+    is_anonymous = models.BooleanField(
+        default=False,
+        help_text="True if reporter chose to remain anonymous publicly"
+    )
+    anonymous_display_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="Anonymous Citizen",
+        help_text="Display name shown publicly for anonymous reports"
+    )
+    hide_reporter_info = models.BooleanField(
+        default=False,
+        help_text="Hide all reporter information from public view"
     )
 
     # --- Main Report Details ---
@@ -134,6 +183,19 @@ class Report(models.Model):
         blank=True,
         related_name="reports",
         help_text="County department responsible for this issue (auto-detected by AI)."
+    )
+
+    # --- Priority Field ---
+    priority = models.CharField(
+        max_length=20,
+        choices=[
+            ('low', 'Low'),
+            ('medium', 'Medium'),
+            ('high', 'High'),
+            ('urgent', 'Urgent')
+        ],
+        default='medium',
+        help_text="Priority level of the report"
     )
 
     # --- AI Verification ---
@@ -233,6 +295,8 @@ class Report(models.Model):
             models.Index(fields=['county', 'status']),
             models.Index(fields=['department', 'created_at']),
             models.Index(fields=['is_development_showcase', 'created_at']),
+            models.Index(fields=['is_anonymous', 'created_at']),
+            models.Index(fields=['priority', 'created_at']),
         ]
 
     def __str__(self):
@@ -241,6 +305,39 @@ class Report(models.Model):
     # ---------------------------------------------------------------------
     #   Helper Methods
     # ---------------------------------------------------------------------
+    def get_public_reporter_name(self):
+        """Get reporter name for public display (respects anonymity)"""
+        if self.is_anonymous or self.hide_reporter_info:
+            return self.anonymous_display_name
+        return self.reporter.get_full_name()
+    
+    def get_public_reporter_info(self):
+        """Get reporter info for public display (respects anonymity)"""
+        if self.is_anonymous or self.hide_reporter_info:
+            return {
+                'name': self.anonymous_display_name,
+                'is_anonymous': True
+            }
+        return {
+            'name': self.reporter.get_full_name(),
+            'email': self.reporter.email,
+            'is_anonymous': False
+        }
+    
+    def can_view_reporter_details(self, user):
+        """Check if user can view full reporter details"""
+        # Super admins and admins can always see details
+        if user.is_superuser or user.is_admin:
+            return True
+        # County officials can see details for reports in their county
+        if user.is_county_official and user.county == self.county:
+            return True
+        # Reporters can always see their own details
+        if user == self.reporter:
+            return True
+        # Everyone else gets anonymous view
+        return False
+
     def soft_delete(self, user=None):
         """Marks the report as deleted without actually removing it."""
         self.status = ReportStatusChoices.DELETED
@@ -312,6 +409,20 @@ class Report(models.Model):
             self.completion_date = completion_date
         self.save(update_fields=["is_development_showcase", "development_budget", "completion_date"])
 
+    def get_main_image_url(self):
+        """Get URL of the first report image with optimizations"""
+        first_image = self.images.first()
+        if first_image:
+            return first_image.image_url
+        return None
+
+    def get_thumbnail_url(self):
+        """Get thumbnail URL of the first report image"""
+        first_image = self.images.first()
+        if first_image:
+            return first_image.thumbnail_url
+        return None
+
     @property
     def engagement_score(self):
         """Calculate engagement score based on likes, comments, and views."""
@@ -319,6 +430,9 @@ class Report(models.Model):
 
     def clean(self):
         """Validate model data."""
+        if self.is_anonymous and not self.anonymous_display_name:
+            self.anonymous_display_name = "Anonymous Citizen"
+            
         if self.is_development_showcase and not self.government_response:
             raise ValidationError("Development showcases must have a government response.")
         
