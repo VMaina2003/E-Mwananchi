@@ -1,8 +1,9 @@
-# serializers.py
+# serializers.py - PRODUCTION READY VERSION
 from rest_framework import serializers
 from django.utils import timezone
 from django.db import transaction
 from django.core.exceptions import ValidationError
+import os
 
 from .models import Report, ReportImage, GovernmentDevelopment, ReportStatusChoices
 from Authentication.models import CustomUser
@@ -10,13 +11,7 @@ from Location.models import County, SubCounty, Ward
 from Departments.models import CountyDepartment
 
 
-# =============================================================================
-# REPORT IMAGE SERIALIZERS
-# =============================================================================
-
 class ReportImageSerializer(serializers.ModelSerializer):
-    """Serializer for report images with Cloudinary URL methods."""
-    
     image_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
     image_id = serializers.UUIDField(source='id', read_only=True)
@@ -30,23 +25,18 @@ class ReportImageSerializer(serializers.ModelSerializer):
         read_only_fields = ["image_id", "uploaded_at"]
 
     def get_image_url(self, obj):
-        """Get full image URL from Cloudinary."""
         return obj.image_url
 
     def get_thumbnail_url(self, obj):
-        """Get thumbnail URL from Cloudinary."""
         return obj.thumbnail_url
 
 
 class ReportImageUploadSerializer(serializers.ModelSerializer):
-    """Serializer for uploading report images."""
-    
     class Meta:
         model = ReportImage
         fields = ["image", "caption"]
     
     def create(self, validated_data):
-        """Create report image with context-based report assignment."""
         report_id = self.context.get('report_id')
         try:
             report = Report.objects.get(id=report_id)
@@ -55,17 +45,28 @@ class ReportImageUploadSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Report not found.")
 
 
-# =============================================================================
-# REPORT CORE SERIALIZERS
-# =============================================================================
-
-class ReportMinimalSerializer(serializers.ModelSerializer):
-    """Minimal serializer for report listings and dropdowns."""
-    
+class ReportBaseSerializer(serializers.ModelSerializer):
     reporter_name = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
     county_name = serializers.CharField(source="county.name", read_only=True)
+    subcounty_name = serializers.CharField(source="subcounty.name", read_only=True, allow_null=True)
+    ward_name = serializers.CharField(source="ward.name", read_only=True, allow_null=True)
+    department_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
+    class Meta:
+        model = Report
+        fields = []
+
+    def get_reporter_name(self, obj):
+        return obj.get_public_reporter_name()
+
+    def get_department_name(self, obj):
+        if obj.department and obj.department.department:
+            return obj.department.department.name
+        return None
+
+
+class ReportMinimalSerializer(ReportBaseSerializer):
     class Meta:
         model = Report
         fields = [
@@ -74,85 +75,37 @@ class ReportMinimalSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_reporter_name(self, obj):
-        """Get public reporter name with anonymity support."""
-        return obj.get_public_reporter_name()
 
-
-class ReportListSerializer(serializers.ModelSerializer):
-    """Serializer for report listing with optimized queries."""
-    
-    # Basic fields
-    reporter_name = serializers.SerializerMethodField()
-    county_name = serializers.CharField(source="county.name", read_only=True)
-    subcounty_name = serializers.CharField(source="subcounty.name", read_only=True, allow_null=True)
-    ward_name = serializers.CharField(source="ward.name", read_only=True, allow_null=True)
-    department_name = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-    
-    # Image fields
+class ReportListSerializer(ReportBaseSerializer):
     image_count = serializers.SerializerMethodField()
     has_images = serializers.SerializerMethodField()
     main_image_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
-    
-    # Engagement fields
     current_user_liked = serializers.SerializerMethodField()
     engagement_score = serializers.FloatField(read_only=True)
-    
-    # AI verification
     ai_confidence_percentage = serializers.SerializerMethodField()
-    
-    # Anonymous reporting
-    is_anonymous = serializers.BooleanField(read_only=True)
+    is_development_showcase = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Report
         fields = [
-            # Core identification
             "id", "title", "description", "status", "status_display",
-            "created_at", "updated_at",
-            
-            # Location information
-            "county_name", "subcounty_name", "ward_name",
-            
-            # Reporter information
-            "reporter_name", "role_at_submission", "is_anonymous",
-            
-            # Department information
-            "department_name",
-            
-            # Image information
+            "created_at", "updated_at", "county_name", "subcounty_name", "ward_name",
+            "reporter_name", "role_at_submission", "is_anonymous", "department_name",
             "image_count", "has_images", "main_image_url", "thumbnail_url",
-            
-            # AI verification
             "verified_by_ai", "ai_confidence", "ai_confidence_percentage",
-            "image_required_passed",
-            
-            # Engagement metrics
-            "likes_count", "comments_count", "views_count",
-            "current_user_liked", "engagement_score",
+            "image_required_passed", "likes_count", "comments_count", "views_count",
+            "current_user_liked", "engagement_score", "is_development_showcase",
+            "development_budget", "development_progress"
         ]
         read_only_fields = fields
 
-    def get_reporter_name(self, obj):
-        """Get public reporter name respecting anonymity."""
-        return obj.get_public_reporter_name()
-
-    def get_department_name(self, obj):
-        """Get department name from related object."""
-        if obj.department and obj.department.department:
-            return obj.department.department.name
-        return None
-
     def get_image_count(self, obj):
-        """Get optimized image count using prefetch cache."""
         if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
             return len(obj._prefetched_objects_cache['images'])
         return obj.images.count()
 
     def get_has_images(self, obj):
-        """Check if report has any images."""
         if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
             return len(obj._prefetched_objects_cache['images']) > 0
         if getattr(obj, 'image_required_passed', False):
@@ -160,96 +113,50 @@ class ReportListSerializer(serializers.ModelSerializer):
         return obj.images.exists()
     
     def get_main_image_url(self, obj):
-        """Get main image URL for listing display."""
         return obj.get_main_image_url()
 
     def get_thumbnail_url(self, obj):
-        """Get thumbnail URL for listing display."""
         return obj.get_thumbnail_url()
     
     def get_current_user_liked(self, obj):
-        """Check if current user liked this report."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.likes.filter(id=request.user.id).exists()
         return False
 
     def get_ai_confidence_percentage(self, obj):
-        """Convert AI confidence to percentage for display."""
         if obj.ai_confidence:
             return round(obj.ai_confidence * 100, 1)
         return None
 
 
-class ReportDetailSerializer(serializers.ModelSerializer):
-    """Detailed serializer for individual report view with full data."""
-    
-    # Related objects
+class ReportDetailSerializer(ReportBaseSerializer):
     images = ReportImageSerializer(many=True, read_only=True)
-    
-    # Controlled reporter information
     reporter_info = serializers.SerializerMethodField()
     can_view_reporter_details = serializers.SerializerMethodField()
-    
-    # Display fields
-    county_name = serializers.CharField(source="county.name", read_only=True)
-    subcounty_name = serializers.CharField(source="subcounty.name", read_only=True, allow_null=True)
-    ward_name = serializers.CharField(source="ward.name", read_only=True, allow_null=True)
-    department_name = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
     responded_by_name = serializers.CharField(source="responded_by.get_full_name", read_only=True, allow_null=True)
-    
-    # Image fields
     main_image_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
     image_count = serializers.SerializerMethodField()
-    
-    # Engagement fields
     current_user_liked = serializers.SerializerMethodField()
     engagement_score = serializers.FloatField(read_only=True)
-    
-    # AI verification
     ai_confidence_percentage = serializers.SerializerMethodField()
-    
-    # Development showcase
     development_progress_display = serializers.SerializerMethodField()
+    is_development_showcase = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Report
         fields = [
-            # Core identification
-            "id", "title", "description", 
-            
-            # Reporter information
-            "reporter_info", "can_view_reporter_details", "is_anonymous",
-            
-            # Location information
-            "county", "county_name", "subcounty", "subcounty_name", 
-            "ward", "ward_name", "latitude", "longitude",
-            
-            # Department assignment
-            "department", "department_name",
-            
-            # Status tracking
-            "status", "status_display", "created_at", "updated_at",
-            
-            # AI verification
-            "verified_by_ai", "ai_confidence", "ai_confidence_percentage",
-            "image_required_passed",
-            
-            # Media
-            "images", "main_image_url", "thumbnail_url", "image_count",
-            
-            # Social engagement
-            "likes_count", "comments_count", "views_count",
-            "current_user_liked", "engagement_score",
-            
-            # Government response
+            "id", "title", "description", "reporter_info", "can_view_reporter_details", 
+            "is_anonymous", "county", "county_name", "subcounty", "subcounty_name", 
+            "ward", "ward_name", "latitude", "longitude", "department", "department_name",
+            "status", "status_display", "created_at", "updated_at", "verified_by_ai", 
+            "ai_confidence", "ai_confidence_percentage", "image_required_passed",
+            "images", "main_image_url", "thumbnail_url", "image_count", "likes_count", 
+            "comments_count", "views_count", "current_user_liked", "engagement_score",
             "government_response", "response_date", "responded_by", "responded_by_name",
-            
-            # Development showcase
-            "is_development_showcase", "development_budget", 
-            "completion_date", "development_progress", "development_progress_display"
+            "is_development_showcase", "development_budget", "completion_date", 
+            "development_progress", "development_progress_display"
         ]
         read_only_fields = [
             "id", "reporter", "role_at_submission", "created_at", "updated_at",
@@ -259,7 +166,6 @@ class ReportDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_reporter_info(self, obj):
-        """Get reporter information with access control."""
         request = self.context.get('request')
         if request and request.user.is_authenticated and obj.can_view_reporter_details(request.user):
             return {
@@ -273,65 +179,43 @@ class ReportDetailSerializer(serializers.ModelSerializer):
             return obj.get_public_reporter_info()
     
     def get_can_view_reporter_details(self, obj):
-        """Check if current user can view reporter details."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.can_view_reporter_details(request.user)
         return False
     
-    def get_department_name(self, obj):
-        """Get department name from related object."""
-        if obj.department and obj.department.department:
-            return obj.department.department.name
-        return None
-    
     def get_main_image_url(self, obj):
-        """Get main image URL."""
         return obj.get_main_image_url()
 
     def get_thumbnail_url(self, obj):
-        """Get thumbnail URL."""
         return obj.get_thumbnail_url()
 
     def get_image_count(self, obj):
-        """Get total image count."""
         return obj.images.count()
     
     def get_current_user_liked(self, obj):
-        """Check if current user liked this report."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.likes.filter(id=request.user.id).exists()
         return False
 
     def get_ai_confidence_percentage(self, obj):
-        """Convert AI confidence to percentage."""
         if obj.ai_confidence:
             return round(obj.ai_confidence * 100, 1)
         return None
 
     def get_development_progress_display(self, obj):
-        """Format development progress for display."""
         if obj.is_development_showcase and obj.development_progress is not None:
             return f"{obj.development_progress}%"
         return None
 
 
 class ReportCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating and updating reports with image upload support."""
-    
-    new_images = serializers.ListField(
-        child=serializers.ImageField(
-            max_length=10000000,
-            allow_empty_file=False,
-            use_url=False
-        ),
-        write_only=True,
+    images = serializers.FileField(
         required=False,
-        help_text="List of images to upload with the report"
+        write_only=True,
+        help_text="Image files to upload with this report"
     )
-    
-    # Anonymous reporting
     is_anonymous = serializers.BooleanField(
         default=False,
         help_text="Whether to hide reporter identity"
@@ -343,34 +227,42 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         default="Anonymous Citizen",
         help_text="Display name for anonymous reports"
     )
+    is_development_showcase = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="Mark as true for government development projects"
+    )
+    development_budget = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        help_text="Budget allocated for development project"
+    )
+    completion_date = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text="Expected completion date for development project"
+    )
+    development_progress = serializers.IntegerField(
+        default=0,
+        required=False,
+        help_text="Progress percentage for development project"
+    )
 
     class Meta:
         model = Report
         fields = [
-            # Core fields
-            "title", "description",
-            
-            # Location
-            "county", "subcounty", "ward", "latitude", "longitude",
-            
-            # Department
-            "department",
-            
-            # Priority
-            "priority",
-            
-            # Anonymous reporting
-            "is_anonymous", "anonymous_display_name",
-            
-            # Images
-            "new_images",
+            "title", "description", "county", "subcounty", "ward", 
+            "latitude", "longitude", "department", "priority",
+            "is_anonymous", "anonymous_display_name", "images",
+            "is_development_showcase", "development_budget", 
+            "completion_date", "development_progress"
         ]
 
     def validate(self, data):
-        """Comprehensive validation for report data."""
         errors = {}
         
-        # Title validation
         title = data.get("title", "").strip()
         if not title:
             errors["title"] = "A report title is required."
@@ -379,7 +271,6 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         elif len(title) > 255:
             errors["title"] = "Title cannot exceed 255 characters."
         
-        # Description validation
         description = data.get("description", "").strip()
         if not description:
             errors["description"] = "Please provide a detailed description of the issue."
@@ -388,15 +279,13 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         elif len(description) > 5000:
             errors["description"] = "Description cannot exceed 5000 characters."
         
-        # County validation
         if not data.get("county"):
             errors["county"] = "Please select a county."
         
-        # Location coordinates validation
         latitude = data.get("latitude")
         longitude = data.get("longitude")
         
-        if latitude is not None:
+        if latitude is not None and latitude != "":
             try:
                 lat_float = float(latitude)
                 if not (-90 <= lat_float <= 90):
@@ -404,7 +293,7 @@ class ReportCreateSerializer(serializers.ModelSerializer):
             except (TypeError, ValueError):
                 errors["latitude"] = "Latitude must be a valid number."
         
-        if longitude is not None:
+        if longitude is not None and longitude != "":
             try:
                 lon_float = float(longitude)
                 if not (-180 <= lon_float <= 180):
@@ -412,7 +301,6 @@ class ReportCreateSerializer(serializers.ModelSerializer):
             except (TypeError, ValueError):
                 errors["longitude"] = "Longitude must be a valid number."
         
-        # Anonymous display name validation
         if data.get('is_anonymous', False):
             display_name = data.get('anonymous_display_name', '').strip()
             if not display_name:
@@ -420,10 +308,42 @@ class ReportCreateSerializer(serializers.ModelSerializer):
             elif len(display_name) > 100:
                 errors['anonymous_display_name'] = "Display name cannot exceed 100 characters."
         
-        # Image validation
-        new_images = data.get("new_images", [])
-        if new_images and len(new_images) > 10:
-            errors["new_images"] = "You can upload a maximum of 10 images per report."
+        if data.get('is_development_showcase', False):
+            development_progress = data.get('development_progress', 0)
+            if not (0 <= development_progress <= 100):
+                errors['development_progress'] = "Development progress must be between 0 and 100."
+            
+            development_budget = data.get('development_budget')
+            if development_budget and development_budget < 0:
+                errors['development_budget'] = "Development budget cannot be negative."
+        
+        request = self.context.get('request')
+        if request and hasattr(request, 'FILES'):
+            images = request.FILES.getlist('images')
+            if images:
+                if len(images) > 10:
+                    errors["images"] = ["You can upload a maximum of 10 images per report."]
+                
+                for i, image in enumerate(images):
+                    if hasattr(image, 'size') and image.size > 10 * 1024 * 1024:
+                        errors.setdefault("images", []).append(
+                            f"Image {i+1} is too large ({(image.size / 1024 / 1024):.1f}MB). Maximum size is 10MB."
+                        )
+                    
+                    if hasattr(image, 'content_type'):
+                        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+                        if image.content_type not in allowed_types:
+                            errors.setdefault("images", []).append(
+                                f"Image {i+1} must be JPEG, PNG, or WebP format. Found: {image.content_type}"
+                            )
+                    else:
+                        if hasattr(image, 'name'):
+                            allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+                            file_extension = os.path.splitext(image.name)[1].lower()
+                            if file_extension not in allowed_extensions:
+                                errors.setdefault("images", []).append(
+                                    f"Image {i+1} must be JPEG, PNG, or WebP format. Found: {file_extension}"
+                                )
         
         if errors:
             raise serializers.ValidationError(errors)
@@ -431,10 +351,9 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         return data
 
     def validate_title(self, value):
-        """Validate title uniqueness for the user."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            recent_cutoff = timezone.now() - timezone.timedelta(hours=24)
+            recent_cutoff = timezone.now() - timezone.timedelta(hours=1)
             duplicate_exists = Report.objects.filter(
                 title=value.strip(),
                 reporter=request.user,
@@ -444,14 +363,13 @@ class ReportCreateSerializer(serializers.ModelSerializer):
             if duplicate_exists and self.instance is None:
                 raise serializers.ValidationError(
                     "You have already submitted a report with this title recently. "
-                    "Please use a different title or wait 24 hours."
+                    "Please use a different title or wait a while."
                 )
         return value.strip()
 
     @transaction.atomic
     def create(self, validated_data):
-        """Create report with image uploads in a transaction."""
-        new_images = validated_data.pop('new_images', [])
+        validated_data.pop('images', None)
         
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
@@ -459,79 +377,141 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         
         reporter = request.user
         
-        # Handle anonymous display name
         if validated_data.get('is_anonymous', False):
             display_name = validated_data.get('anonymous_display_name', '').strip()
             if not display_name:
                 validated_data['anonymous_display_name'] = "Anonymous Citizen"
         
-        # Create the report
         try:
             report = Report.objects.create(
                 reporter=reporter,
                 role_at_submission=reporter.role,
                 **validated_data
             )
+            
+            if request and hasattr(request, 'FILES'):
+                images = request.FILES.getlist('images')
+                if images:
+                    for image_file in images:
+                        ReportImage.objects.create(
+                            report=report, 
+                            image=image_file,
+                            caption=f"Image evidence for {report.title}"
+                        )
+                    
+                    report.image_required_passed = True
+                    report.save(update_fields=["image_required_passed"])
+            
+            return report
+            
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Report creation failed: {str(e)}")
             raise serializers.ValidationError(f"Failed to create report: {str(e)}")
-        
-        # Handle image uploads
-        if new_images:
-            try:
-                for image_file in new_images:
-                    ReportImage.objects.create(
-                        report=report, 
-                        image=image_file,
-                        caption=f"Image evidence for {report.title}"
-                    )
-                
-                report.image_required_passed = True
-                report.save(update_fields=["image_required_passed"])
-                
-            except Exception as e:
-                raise serializers.ValidationError(f"Failed to upload images: {str(e)}")
 
-        return report
+
+class ReportUpdateSerializer(serializers.ModelSerializer):
+    images = serializers.FileField(
+        required=False,
+        write_only=True,
+        help_text="Additional images to upload"
+    )
+    is_development_showcase = serializers.BooleanField(required=False)
+    development_budget = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True
+    )
+    completion_date = serializers.DateField(required=False, allow_null=True)
+    development_progress = serializers.IntegerField(required=False)
+
+    class Meta:
+        model = Report
+        fields = [
+            "title", "description", "county", "subcounty", "ward", 
+            "latitude", "longitude", "department", "priority",
+            "is_anonymous", "anonymous_display_name", "images",
+            "is_development_showcase", "development_budget", 
+            "completion_date", "development_progress"
+        ]
+
+    def validate(self, data):
+        data.pop('images', None)
+        
+        errors = {}
+        
+        title = data.get("title")
+        if title:
+            title = title.strip()
+            if len(title) < 5:
+                errors["title"] = "Title must be at least 5 characters long."
+            elif len(title) > 255:
+                errors["title"] = "Title cannot exceed 255 characters."
+        
+        description = data.get("description")
+        if description:
+            description = description.strip()
+            if len(description) < 10:
+                errors["description"] = "Description must be at least 10 characters long."
+            elif len(description) > 5000:
+                errors["description"] = "Description cannot exceed 5000 characters."
+        
+        if data.get('is_development_showcase', False):
+            development_progress = data.get('development_progress', 0)
+            if not (0 <= development_progress <= 100):
+                errors['development_progress'] = "Development progress must be between 0 and 100."
+        
+        request = self.context.get('request')
+        if request and hasattr(request, 'FILES'):
+            images_data = request.FILES.getlist('images')
+            if images_data and len(images_data) > 10:
+                errors["images"] = ["You can upload a maximum of 10 images per report."]
+        
+        if errors:
+            raise serializers.ValidationError(errors)
+        
+        return data
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        """Update report with new images."""
         if not instance.is_editable_by_reporter():
             raise serializers.ValidationError({
-                "detail": "This report can no longer be edited. "
-                         "Only reports with 'Submitted' status can be modified."
+                "detail": "This report can no longer be edited. Only reports with 'Submitted' status can be modified."
             })
 
-        new_images = validated_data.pop('new_images', [])
+        validated_data.pop('images', None)
         
-        # Update allowed fields
         allowed_fields = [
             "title", "description", "county", "subcounty", "ward", 
             "latitude", "longitude", "department", "priority",
-            "is_anonymous", "anonymous_display_name"
+            "is_anonymous", "anonymous_display_name", "is_development_showcase",
+            "development_budget", "completion_date", "development_progress"
         ]
         
         for field, value in validated_data.items():
             if field in allowed_fields:
                 setattr(instance, field, value)
 
-        # Handle new image uploads
-        if new_images:
-            current_count = instance.images.count()
-            if current_count + len(new_images) > 10:
-                raise serializers.ValidationError({
-                    "new_images": f"Cannot add {len(new_images)} images. "
-                                f"Report already has {current_count} images (max 10)."
-                })
-            
-            for image_file in new_images:
-                ReportImage.objects.create(
-                    report=instance, 
-                    image=image_file,
-                    caption=f"Additional image for {instance.title}"
-                )
-            
-            instance.image_required_passed = True
+        request = self.context.get('request')
+        if request and hasattr(request, 'FILES'):
+            images_data = request.FILES.getlist('images')
+            if images_data:
+                current_count = instance.images.count()
+                if current_count + len(images_data) > 10:
+                    raise serializers.ValidationError({
+                        "images": [f"Cannot add {len(images_data)} images. Report already has {current_count} images (max 10)."]
+                    })
+                
+                for image_file in images_data:
+                    ReportImage.objects.create(
+                        report=instance, 
+                        image=image_file,
+                        caption=f"Additional image for {instance.title}"
+                    )
+                
+                instance.image_required_passed = True
 
         instance.updated_at = timezone.now()
         instance.save()
@@ -539,34 +519,40 @@ class ReportCreateSerializer(serializers.ModelSerializer):
         return instance
 
 
-class ReportSerializer(ReportCreateSerializer):
-    """Main report serializer that combines create/update with read capabilities."""
-    
-    # Add read-only fields for general use
-    reporter_name = serializers.SerializerMethodField(read_only=True)
-    county_name = serializers.CharField(source="county.name", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+class ReportSerializer(ReportBaseSerializer):
     images = ReportImageSerializer(many=True, read_only=True)
+    current_user_liked = serializers.SerializerMethodField()
+    is_development_showcase = serializers.BooleanField(read_only=True)
 
-    class Meta(ReportCreateSerializer.Meta):
-        fields = ReportCreateSerializer.Meta.fields + [
-            "id", "status", "status_display", "reporter_name", "county_name",
+    class Meta:
+        model = Report
+        fields = [
+            "id", "title", "description", "status", "status_display",
+            "county", "county_name", "subcounty", "subcounty_name", 
+            "ward", "ward_name", "department", "department_name",
+            "latitude", "longitude", "priority", "is_anonymous",
             "verified_by_ai", "ai_confidence", "image_required_passed",
-            "created_at", "updated_at", "images"
+            "likes_count", "comments_count", "views_count", "current_user_liked",
+            "government_response", "response_date", "responded_by",
+            "created_at", "updated_at", "images", "reporter_name",
+            "is_development_showcase", "development_budget", 
+            "completion_date", "development_progress"
         ]
         read_only_fields = [
             "id", "status", "verified_by_ai", "ai_confidence", 
-            "image_required_passed", "created_at", "updated_at"
+            "image_required_passed", "likes_count", "comments_count", 
+            "views_count", "response_date", "responded_by", "created_at", 
+            "updated_at", "reporter_name"
         ]
 
-    def get_reporter_name(self, obj):
-        """Get public reporter name."""
-        return obj.get_public_reporter_name()
+    def get_current_user_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(id=request.user.id).exists()
+        return False
 
 
 class ReportStatusUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating report status."""
-    
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     previous_status = serializers.CharField(read_only=True)
 
@@ -576,7 +562,6 @@ class ReportStatusUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = ["status_display", "previous_status"]
 
     def validate_status(self, value):
-        """Validate status choice."""
         valid_choices = [choice[0] for choice in ReportStatusChoices.choices]
         if value not in valid_choices:
             raise serializers.ValidationError(
@@ -585,103 +570,59 @@ class ReportStatusUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
-        """Update report status with tracking."""
         new_status = validated_data["status"]
         self.previous_status = instance.status
         instance.mark_status(new_status)
         return instance
 
     def to_representation(self, instance):
-        """Include previous status in response."""
         representation = super().to_representation(instance)
         representation['previous_status'] = getattr(self, 'previous_status', instance.status)
         return representation
 
 
-# =============================================================================
-# REPORT STATISTICS SERIALIZER
-# =============================================================================
-
 class ReportStatsSerializer(serializers.Serializer):
-    """Serializer for report statistics and analytics."""
-    
-    # Basic counts
     total_reports = serializers.IntegerField()
     verified_reports = serializers.IntegerField()
     pending_reports = serializers.IntegerField()
+    resolved_reports = serializers.IntegerField()
     rejected_reports = serializers.IntegerField()
     reports_with_images = serializers.IntegerField()
     ai_verified_reports = serializers.IntegerField()
-    
-    # User-specific stats
     user_reports_count = serializers.IntegerField()
     user_resolved_reports = serializers.IntegerField()
-    
-    # Time-based stats
-    recent_reports_count = serializers.IntegerField(help_text="Reports from last 7 days")
-    today_reports_count = serializers.IntegerField(help_text="Reports submitted today")
-    
-    # Distribution stats
+    recent_reports_count = serializers.IntegerField()
+    today_reports_count = serializers.IntegerField()
     reports_by_status = serializers.DictField()
     reports_by_county = serializers.DictField()
     reports_by_department = serializers.DictField()
-    
-    # Engagement stats
     total_likes = serializers.IntegerField()
     total_comments = serializers.IntegerField()
     total_views = serializers.IntegerField()
     average_engagement_score = serializers.FloatField()
 
 
-# =============================================================================
-# GOVERNMENT DEVELOPMENT SERIALIZERS
-# =============================================================================
-
 class GovernmentDevelopmentSerializer(serializers.ModelSerializer):
-    """Serializer for government development projects."""
-    
-    # Related object display fields
     county_name = serializers.CharField(source='county.name', read_only=True)
     department_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     created_by_email = serializers.CharField(source='created_by.email', read_only=True)
-    
-    # Engagement fields
     is_liked = serializers.SerializerMethodField()
-    
-    # Progress fields
     days_remaining = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
     progress_status = serializers.SerializerMethodField()
-    
-    # Budget formatting
     budget_formatted = serializers.SerializerMethodField()
 
     class Meta:
         model = GovernmentDevelopment
         fields = [
-            # Core information
-            'id', 'title', 'description',
-            
-            # Location and department
-            'county', 'county_name', 'department', 'department_name',
-            
-            # Project details
-            'budget', 'budget_formatted', 'start_date', 'expected_completion', 
-            'actual_completion', 'status',
-            
-            # Progress tracking
+            'id', 'title', 'description', 'county', 'county_name', 
+            'department', 'department_name', 'budget', 'budget_formatted', 
+            'start_date', 'expected_completion', 'actual_completion', 'status',
             'progress_percentage', 'progress_status', 'progress_updates',
-            
-            # Engagement metrics
             'likes_count', 'comments_count', 'views_count', 'is_liked',
-            
-            # Metadata
             'created_by', 'created_by_name', 'created_by_email',
-            'created_at', 'updated_at',
-            
-            # Calculated fields
-            'days_remaining', 'is_overdue'
+            'created_at', 'updated_at', 'days_remaining', 'is_overdue'
         ]
         read_only_fields = [
             'created_by', 'created_at', 'updated_at', 
@@ -690,26 +631,22 @@ class GovernmentDevelopmentSerializer(serializers.ModelSerializer):
         ]
 
     def get_department_name(self, obj):
-        """Get department name from related object."""
         if obj.department and obj.department.department:
             return obj.department.department.name
         return None
 
     def get_created_by_name(self, obj):
-        """Get creator's full name."""
         if obj.created_by:
             return obj.created_by.get_full_name()
         return None
 
     def get_is_liked(self, obj):
-        """Check if current user liked this project."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             return obj.likes.filter(id=request.user.id).exists()
         return False
 
     def get_progress_status(self, obj):
-        """Get human-readable progress status."""
         if obj.progress_percentage == 0:
             return "Not Started"
         elif obj.progress_percentage < 25:
@@ -724,25 +661,21 @@ class GovernmentDevelopmentSerializer(serializers.ModelSerializer):
             return "Completed"
 
     def get_budget_formatted(self, obj):
-        """Format budget as currency."""
         if obj.budget:
             return f"KSh {obj.budget:,.2f}"
         return None
 
     def validate_budget(self, value):
-        """Validate budget is non-negative."""
         if value and value < 0:
             raise serializers.ValidationError("Budget cannot be negative.")
         return value
 
     def validate_start_date(self, value):
-        """Validate start date is not in the past."""
         if value and value < timezone.now().date():
             raise serializers.ValidationError("Start date cannot be in the past.")
         return value
 
     def validate(self, data):
-        """Validate date relationships."""
         expected_completion = data.get('expected_completion')
         start_date = data.get('start_date')
         actual_completion = data.get('actual_completion')
@@ -761,8 +694,6 @@ class GovernmentDevelopmentSerializer(serializers.ModelSerializer):
 
 
 class GovernmentDevelopmentProgressSerializer(serializers.ModelSerializer):
-    """Serializer for updating government development progress."""
-    
     previous_progress = serializers.IntegerField(read_only=True)
     progress_change = serializers.IntegerField(read_only=True)
 
@@ -775,13 +706,11 @@ class GovernmentDevelopmentProgressSerializer(serializers.ModelSerializer):
         read_only_fields = ['previous_progress', 'progress_change']
 
     def validate_progress_percentage(self, value):
-        """Validate progress percentage range."""
         if not (0 <= value <= 100):
             raise serializers.ValidationError("Progress percentage must be between 0 and 100.")
         return value
 
     def update(self, instance, validated_data):
-        """Update progress with change tracking."""
         previous_progress = instance.progress_percentage
         progress_percentage = validated_data.get('progress_percentage', previous_progress)
         progress_updates = validated_data.get('progress_updates')
@@ -794,7 +723,6 @@ class GovernmentDevelopmentProgressSerializer(serializers.ModelSerializer):
         return instance
 
     def to_representation(self, instance):
-        """Include progress change information."""
         representation = super().to_representation(instance)
         representation['previous_progress'] = getattr(self, 'previous_progress', instance.progress_percentage)
         representation['progress_change'] = getattr(self, 'progress_change', 0)

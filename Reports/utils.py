@@ -8,7 +8,6 @@ from rapidfuzz import process, fuzz
 logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
 def classify_department(title: str, description: str, known_departments: list):
     """
     Enhanced AI classification for reports with better prompting and error handling.
@@ -74,17 +73,13 @@ IMPORTANT:
         try:
             logger.info(f"Attempting AI classification with {model_name}")
             
-            # FIXED: Use the correct API format for the new Gemini client
+            # FIXED: Remove safety_settings parameter
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config={
                     "temperature": 0.1,
                     "max_output_tokens": 500,
-                },
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
                 }
             )
             

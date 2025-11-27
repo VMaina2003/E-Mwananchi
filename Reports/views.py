@@ -1,8 +1,9 @@
-# Reports/views.py - COMPLETELY REWRITTEN AND OPTIMIZED
+# Reports/views.py - COMPLETE FIXED VERSION WITH OFFICIAL MANAGEMENT
 import logging
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.conf import settings
 from django.core.mail import send_mail
@@ -15,6 +16,8 @@ from datetime import timedelta
 
 from .models import Report, ReportImage, GovernmentDevelopment, ReportStatusChoices
 from .serializers import (
+    ReportCreateSerializer,
+    ReportUpdateSerializer,
     ReportSerializer,
     ReportStatusUpdateSerializer,
     ReportListSerializer,
@@ -33,9 +36,6 @@ from notifications.utils import create_notification, notify_county_officials
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# CUSTOM PERMISSIONS
-# ============================================================
 class IsAuthenticatedAndHasRole(permissions.BasePermission):
     """Allows only authenticated users with valid roles."""
     
@@ -67,10 +67,18 @@ class IsReporterOrOfficial(permissions.BasePermission):
 
 
 class CanUpdateStatus(permissions.BasePermission):
-    """Allows report status updates by officials/admins only."""
+    """
+    Permission class that allows report status updates by any county official,
+    administrator, or super administrator.
+    """
     
     def has_permission(self, request, view):
+        """
+        Check if user has permission to update report status.
+        Allows any county official, admin, or superadmin regardless of county assignment.
+        """
         return (
+            request.user and
             request.user.is_authenticated and
             request.user.role in [
                 CustomUser.Roles.COUNTY_OFFICIAL,
@@ -80,9 +88,6 @@ class CanUpdateStatus(permissions.BasePermission):
         )
 
 
-# ============================================================
-# REPORT VIEWSET - COMPLETELY REWRITTEN
-# ============================================================
 class ReportViewSet(viewsets.ModelViewSet):
     """
     Comprehensive ViewSet for report operations with AI classification,
@@ -96,8 +101,10 @@ class ReportViewSet(viewsets.ModelViewSet):
         "images", "likes"
     ).order_by("-created_at")
     
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [IsAuthenticatedAndHasRole]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    
     filterset_fields = {
         "status": ["exact", "in"],
         "county": ["exact"],
@@ -107,38 +114,45 @@ class ReportViewSet(viewsets.ModelViewSet):
         "is_anonymous": ["exact"],
         "created_at": ["gte", "lte", "exact"],
     }
+    
     search_fields = [
         "title", "description", 
         "county__name", "department__department__name",
         "reporter__first_name", "reporter__last_name"
     ]
+    
     ordering_fields = [
         "created_at", "updated_at", "ai_confidence", 
         "status", "likes_count", "views_count", "priority"
     ]
+    
     ordering = ["-created_at"]
 
     def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
+        """
+        Return appropriate serializer class based on the current action.
+        """
         serializer_map = {
             'list': ReportListSerializer,
             'retrieve': ReportDetailSerializer,
+            'create': ReportCreateSerializer,
+            'update': ReportUpdateSerializer,
+            'partial_update': ReportUpdateSerializer,
             'update_status': ReportStatusUpdateSerializer,
             'upload_images': ReportImageUploadSerializer,
-            'create': ReportSerializer,
-            'update': ReportSerializer,
-            'partial_update': ReportSerializer,
+            'my_reports': ReportListSerializer,
+            'stats': ReportStatsSerializer,
         }
         return serializer_map.get(self.action, ReportSerializer)
 
     def get_queryset(self):
         """
-        Filter queryset based on user role and permissions with optimized queries.
+        Filter queryset based on user role and permissions.
+        Provides appropriate data access based on user privileges.
         """
         user = self.request.user
         queryset = super().get_queryset()
 
-        # Handle my_reports filter
         my_reports = self.request.query_params.get('my_reports', '').lower() == 'true'
         reporter_id = self.request.query_params.get('reporter')
 
@@ -147,95 +161,163 @@ class ReportViewSet(viewsets.ModelViewSet):
         if reporter_id:
             return queryset.filter(reporter_id=reporter_id)
 
-        # Apply role-based filtering
         if user.is_superadmin or user.is_admin:
             return queryset
         elif user.is_county_official:
-            if user.county:
-                return queryset.filter(county=user.county)
             return queryset
         else:
-            # Citizens and viewers see all reports but with limited fields
             return queryset
 
     def get_permissions(self):
         """
-        Apply specific permissions based on action.
+        Apply specific permission classes based on the action being performed.
         """
         if self.action in ['update', 'partial_update', 'destroy']:
             permission_classes = [IsAuthenticatedAndHasRole, IsReporterOrOfficial]
-        elif self.action in ['update_status']:
+        elif self.action in ['update_status', 'add_response', 'assign_department', 'update_priority']:
             permission_classes = [IsAuthenticatedAndHasRole, CanUpdateStatus]
+        elif self.action in ['like', 'unlike']:
+            permission_classes = [IsAuthenticatedAndHasRole]
         else:
             permission_classes = [IsAuthenticatedAndHasRole]
         
         return [permission() for permission in permission_classes]
 
+    def get_serializer_context(self):
+        """
+        Add request object to serializer context for access in serializers.
+        """
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def can_user_manage_report(self, user, report):
+        """
+        Check if user has permission to manage a specific report.
+        Allows any county official to manage any report regardless of county assignment.
+        """
+        if user.is_superadmin or user.is_admin:
+            return True
+        if user.is_county_official:
+            return True
+        return False
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """
-        Create a new report with AI classification and image upload.
+        Create a new report with AI classification and image upload functionality.
+        Includes comprehensive validation and error handling.
         """
         logger.info(f"Report creation initiated by user: {request.user.email}")
         
-        # Prepare data for processing
-        data = request.data.copy()
-        images = request.FILES.getlist('new_images') or request.FILES.getlist('images')
+        logger.info(f"Request data keys: {list(request.data.keys())}")
+        logger.info(f"Request FILES keys: {list(request.FILES.keys())}")
         
-        logger.info(f"Received {len(images)} images for report creation")
+        images = request.FILES.getlist('images')
+        logger.info(f"Found {len(images)} images in field 'images'")
+        
+        for img in images:
+            logger.info(f"Image: {img.name} ({img.size} bytes, {img.content_type})")
 
-        # Process location data
+        data = request.data.copy()
+        
+        data.pop('images', None)
+        data.pop('new_images', None)
+        
+        logger.info(f"Data after cleanup: {list(data.keys())}")
+
         self._process_location_data(data)
         
-        # Perform AI classification
         ai_result = self._perform_ai_classification(data)
         self._apply_ai_results(data, ai_result)
 
-        # Validate and create report
-        serializer = self.get_serializer(data=data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+        serializer = ReportCreateSerializer(data=data, context={'request': request})
+        
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            logger.error(f"Serializer validation failed: {str(e)}")
+            return Response(
+                {"detail": "Validation failed", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             with transaction.atomic():
-                # Create report instance
-                report = serializer.save(reporter=request.user)
+                report = serializer.save()
                 logger.info(f"Report created successfully: {report.id}")
 
-                # Handle image uploads
-                if images:
-                    self._upload_report_images(report, images)
-                    report.image_required_passed = True
-                    report.save(update_fields=["image_required_passed"])
-                    logger.info(f"Uploaded {len(images)} images for report {report.id}")
+                image_count = report.images.count()
+                logger.info(f"Report now has {image_count} images attached")
 
-                # Post-creation actions
                 self._handle_post_creation_actions(request, report, ai_result)
 
         except Exception as e:
             logger.error(f"Report creation failed: {str(e)}")
             return Response(
-                {"detail": "Failed to create report. Please try again."},
+                {"detail": f"Failed to create report: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Return detailed report data
         return Response(
             ReportDetailSerializer(report, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        """
+        Update an existing report with proper validation and permission checks.
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        if not (instance.reporter == request.user or 
+                request.user.is_superadmin or 
+                request.user.is_admin or
+                (request.user.is_county_official and instance.county == request.user.county)):
+            return Response(
+                {"detail": "You do not have permission to edit this report."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        data = request.data.copy()
+        
+        data.pop('images', None)
+        data.pop('new_images', None)
+
+        serializer = ReportUpdateSerializer(
+            instance, 
+            data=data, 
+            partial=partial,
+            context={'request': request}
+        )
+        
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            logger.error(f"Serializer validation failed during update: {str(e)}")
+            return Response(
+                {"detail": "Validation failed", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        report = serializer.save()
+        
+        return Response(
+            ReportDetailSerializer(report, context={'request': request}).data,
+            status=status.HTTP_200_OK
+        )
     def retrieve(self, request, *args, **kwargs):
         """Retrieve report with view count increment."""
         instance = self.get_object()
         instance.increment_views()
-        serializer = self.get_serializer(instance)
+        serializer = ReportDetailSerializer(instance, context={'request': request})
         return Response(serializer.data)
 
-    # ============================================================
-    # CUSTOM ACTIONS
-    # ============================================================
+    # Custom Actions
     
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticatedAndHasRole])
+    @action(detail=True, methods=['post'])
     def like(self, request, pk=None):
         """Like a report."""
         report = self.get_object()
@@ -249,7 +331,7 @@ class ReportViewSet(viewsets.ModelViewSet):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticatedAndHasRole])
+    @action(detail=True, methods=['post'])
     def unlike(self, request, pk=None):
         """Unlike a report."""
         report = self.get_object()
@@ -263,7 +345,7 @@ class ReportViewSet(viewsets.ModelViewSet):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticatedAndHasRole])
+    @action(detail=True, methods=['get'])
     def likes(self, request, pk=None):
         """Get users who liked this report."""
         report = self.get_object()
@@ -272,23 +354,30 @@ class ReportViewSet(viewsets.ModelViewSet):
         serializer = UserMinimalSerializer(likes, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticatedAndHasRole])
+    @action(detail=False, methods=['get'])
     def my_reports(self, request):
         """Get current user's reports with pagination."""
         queryset = self.get_queryset().filter(reporter=request.user)
         page = self.paginate_queryset(queryset)
         
         if page is not None:
-            serializer = self.get_serializer(page, many=True)
+            serializer = ReportListSerializer(page, many=True, context={'request': request})
             return self.get_paginated_response(serializer.data)
             
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = ReportListSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], permission_classes=[CanUpdateStatus])
+    @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         """Update report status with validation."""
         report = self.get_object()
+        
+        # Check if user can manage this county's reports
+        if not self.can_user_manage_report(request.user, report):
+            return Response(
+                {"detail": "You can only update reports from your assigned county."},
+                status=status.HTTP_403_FORBIDDEN
+            )
         
         serializer = ReportStatusUpdateSerializer(
             report, 
@@ -301,12 +390,97 @@ class ReportViewSet(viewsets.ModelViewSet):
         updated_report = serializer.save()
         logger.info(f"Report {report.id} status updated to: {updated_report.status}")
         
-        return Response(ReportDetailSerializer(updated_report).data)
+        return Response(ReportDetailSerializer(updated_report, context={'request': request}).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsReporterOrOfficial])
+    @action(detail=True, methods=['post'])
+    def add_response(self, request, pk=None):
+        """Add government response to report."""
+        report = self.get_object()
+        
+        if not self.can_user_manage_report(request.user, report):
+            return Response(
+                {"detail": "You can only respond to reports from your assigned county."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        response_text = request.data.get('government_response')
+        if not response_text:
+            return Response(
+                {"detail": "Response text is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        report.add_government_response(response_text, request.user)
+        return Response(ReportDetailSerializer(report, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def assign_department(self, request, pk=None):
+        """Assign report to specific department."""
+        report = self.get_object()
+        
+        if not self.can_user_manage_report(request.user, report):
+            return Response(
+                {"detail": "You can only assign reports from your assigned county."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        department_id = request.data.get('department')
+        if not department_id:
+            return Response(
+                {"detail": "Department ID is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            department = CountyDepartment.objects.get(id=department_id)
+            report.department = department
+            report.save()
+            return Response(ReportDetailSerializer(report, context={'request': request}).data)
+        except CountyDepartment.DoesNotExist:
+            return Response(
+                {"detail": "Department not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['post'])
+    def update_priority(self, request, pk=None):
+        """Update report priority."""
+        report = self.get_object()
+        
+        if not self.can_user_manage_report(request.user, report):
+            return Response(
+                {"detail": "You can only update priority for reports from your assigned county."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        priority = request.data.get('priority')
+        valid_priorities = ['low', 'medium', 'high', 'urgent']
+        
+        if priority not in valid_priorities:
+            return Response(
+                {"detail": f"Priority must be one of: {', '.join(valid_priorities)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        report.priority = priority
+        report.save()
+        return Response(ReportDetailSerializer(report, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
     def upload_images(self, request, pk=None):
         """Upload additional images to an existing report."""
         report = self.get_object()
+        
+        # Check permissions
+        if not (report.reporter == request.user or 
+                request.user.is_superadmin or 
+                request.user.is_admin or
+                (request.user.is_county_official and report.county == request.user.county)):
+            return Response(
+                {"detail": "You do not have permission to add images to this report."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         images = request.FILES.getlist('images')
         
         if not images:
@@ -429,9 +603,32 @@ class ReportViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    # ============================================================
-    # PRIVATE HELPER METHODS
-    # ============================================================
+    # Debug endpoint for file upload testing
+    @action(detail=False, methods=['post'])
+    def debug_upload(self, request):
+        """Debug endpoint to check file uploads."""
+        logger.info("Debug upload endpoint called")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Data keys: {list(request.data.keys())}")
+        logger.info(f"Files keys: {list(request.FILES.keys())}")
+        
+        files_detail = {}
+        for key, files in request.FILES.lists():
+            files_detail[key] = [{
+                'name': f.name,
+                'size': f.size,
+                'content_type': f.content_type
+            } for f in files]
+        
+        return Response({
+            'data_keys': list(request.data.keys()),
+            'files_keys': list(request.FILES.keys()),
+            'files_detail': files_detail,
+            'user': request.user.email if request.user.is_authenticated else 'Anonymous'
+        })
+
+    # Private helper methods
     
     def _process_location_data(self, data):
         """Enrich location data with administrative boundaries."""
@@ -467,13 +664,17 @@ class ReportViewSet(viewsets.ModelViewSet):
         )
 
         try:
-            return classify_department(
+            logger.info("Attempting AI classification...")
+            result = classify_department(
                 data.get("title", ""),
                 data.get("description", ""),
                 known_departments
             )
+            logger.info(f"AI classification result: {result}")
+            return result
         except Exception as e:
             logger.error(f"AI classification failed: {e}")
+            # Return fallback result
             return {
                 "verified": False,
                 "confidence": 0.0,
@@ -509,25 +710,13 @@ class ReportViewSet(viewsets.ModelViewSet):
                 data["county"] = county.id
                 logger.info(f"AI assigned county: {county_name}")
 
-    def _upload_report_images(self, report, images):
-        """Upload images to Cloudinary and create ReportImage instances."""
-        for image_file in images:
-            try:
-                ReportImage.objects.create(
-                    report=report,
-                    image=image_file,
-                    caption=f"Evidence for {report.title}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to upload image {image_file.name}: {e}")
-                # Continue with other images
-
     def _handle_post_creation_actions(self, request, report, ai_result):
         """Handle notifications and emails after report creation."""
         # Auto-verify if AI confidence is high
         if report.verified_by_ai and ai_result.get("confidence", 0) >= 0.6:
             report.status = ReportStatusChoices.VERIFIED
             report.save(update_fields=["status"])
+            logger.info(f"Report {report.id} auto-verified due to high AI confidence")
 
         # Send confirmation email
         self._send_confirmation_email(request, report)
@@ -549,7 +738,35 @@ class ReportViewSet(viewsets.ModelViewSet):
                 'report_url': request.build_absolute_uri(f'/reports/{report.id}/'),
             }
             
-            html_message = render_to_string('emails/report_submitted.html', context)
+            # Try multiple template locations
+            template_locations = [
+                'emails/report_submitted.html',
+                'Reports/emails/report_submitted.html',
+            ]
+            
+            html_message = None
+            for template in template_locations:
+                try:
+                    html_message = render_to_string(template, context)
+                    break
+                except:
+                    continue
+            
+            if not html_message:
+                # Create a simple email template if file doesn't exist
+                html_message = f"""
+                <html>
+                <body>
+                    <h2>Report Submitted Successfully</h2>
+                    <p>Hello {request.user.get_full_name()},</p>
+                    <p>Your report has been submitted successfully.</p>
+                    <p><strong>Title:</strong> {report.title}</p>
+                    <p><strong>Reference ID:</strong> #{report.id}</p>
+                    <p>You can view your report at: {request.build_absolute_uri(f'/reports/{report.id}/')}</p>
+                </body>
+                </html>
+                """
+            
             plain_message = strip_tags(html_message)
             
             send_mail(
@@ -560,6 +777,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 html_message=html_message,
                 fail_silently=True,
             )
+            logger.info(f"Confirmation email sent to {request.user.email}")
         except Exception as e:
             logger.error(f"Confirmation email failed: {e}")
 
@@ -573,6 +791,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 description=f"Your report '{report.title}' has been submitted successfully.",
                 target_report=report,
             )
+            logger.info(f"Notification created for reporter {request.user.email}")
         except Exception as e:
             logger.error(f"Reporter notification failed: {e}")
 
@@ -580,13 +799,11 @@ class ReportViewSet(viewsets.ModelViewSet):
         """Notify relevant county officials about the new report."""
         try:
             notify_county_officials(report.county, report)
+            logger.info(f"County officials notified for report {report.id}")
         except Exception as e:
             logger.error(f"County official notification failed: {e}")
 
 
-# ============================================================
-# GOVERNMENT DEVELOPMENT VIEWSET
-# ============================================================
 class GovernmentDevelopmentViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing government development projects.
@@ -624,7 +841,6 @@ class GovernmentDevelopmentViewSet(viewsets.ModelViewSet):
         """Apply create permissions for government projects."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             permission_classes = [IsAuthenticatedAndHasRole]
-            # Additional role checks are handled in the methods
         else:
             permission_classes = [IsAuthenticatedAndHasRole]
         
@@ -704,22 +920,21 @@ class GovernmentDevelopmentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-
     @action(detail=True, methods=['post'])
     def increment_views(self, request, pk=None):
         """Increment view count once per user session"""
-        report = self.get_object()
+        development = self.get_object()
         user = request.user
         
         # Use session to track views to prevent duplicates
-        session_key = f'report_viewed_{report.id}'
+        session_key = f'development_viewed_{development.id}'
         if not request.session.get(session_key):
-            report.views_count += 1
-            report.save(update_fields=['views_count'])
+            development.views_count += 1
+            development.save(update_fields=['views_count'])
             request.session[session_key] = True
             request.session.modified = True
         
-        return Response({'views_count': report.views_count})
+        return Response({'views_count': development.views_count})
 
     @action(detail=False, methods=['get'])
     def stats(self, request):

@@ -9,9 +9,6 @@ from Location.models import County, SubCounty, Ward
 from Departments.models import CountyDepartment
 
 
-# ============================================================
-#   REPORT STATUS CHOICES
-# ============================================================
 class ReportStatusChoices(models.TextChoices):
     """Defines the different states a report can pass through."""
     SUBMITTED = "submitted", "Submitted"
@@ -24,9 +21,6 @@ class ReportStatusChoices(models.TextChoices):
     DELETED = "deleted", "Deleted"
 
 
-# ============================================================
-#   GOVERNMENT DEVELOPMENT STATUS CHOICES
-# ============================================================
 class DevelopmentStatusChoices(models.TextChoices):
     """Defines the status of government development projects."""
     PLANNED = "planned", "Planned"
@@ -36,9 +30,6 @@ class DevelopmentStatusChoices(models.TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
-# ============================================================
-#   REPORT IMAGE MODEL (UPDATED WITH CLOUDINARY)
-# ============================================================
 class ReportImage(models.Model):
     """
     Stores images related to a report using Cloudinary.
@@ -103,28 +94,15 @@ class ReportImage(models.Model):
         return None
 
 
-# ============================================================
-#   REPORT MODEL (COMPLETE VERSION WITH ALL FEATURES)
-# ============================================================
 class Report(models.Model):
     """
     Represents an issue reported by a citizen or official.
-
-    Each report captures:
-    - Reporter info (linked to CustomUser)
-    - Title, description, and optional images
-    - Exact location (County, Subcounty, Ward, GPS)
-    - Automatically or manually assigned department
-    - Status flow (Submitted → Verified → Pending → Noted → On Progress → Resolved)
-    - AI-based verification and confidence score
-    - Social engagement features (likes, comments, views)
-    - Government response system
-    - Anonymous reporting support
+    Complete version with all original features maintained.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    # --- Reporter Info ---
+    # Reporter Info
     reporter = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -136,7 +114,7 @@ class Report(models.Model):
         help_text="Snapshot of the reporter's role when submitting (e.g. citizen)."
     )
 
-    # --- ANONYMOUS REPORTING FIELDS ---
+    # Anonymous Reporting Fields
     is_anonymous = models.BooleanField(
         default=False,
         help_text="True if reporter chose to remain anonymous publicly"
@@ -152,11 +130,11 @@ class Report(models.Model):
         help_text="Hide all reporter information from public view"
     )
 
-    # --- Main Report Details ---
+    # Main Report Details
     title = models.CharField(max_length=255, help_text="Short summary of the issue.")
     description = models.TextField(help_text="Detailed explanation of the issue.")
 
-    # --- Location Data ---
+    # Location Data
     county = models.ForeignKey(
         County, on_delete=models.PROTECT, related_name="reports"
     )
@@ -175,7 +153,7 @@ class Report(models.Model):
         help_text="Longitude from GPS (auto-filled from Check My Location)."
     )
 
-    # --- Department ---
+    # Department
     department = models.ForeignKey(
         CountyDepartment,
         on_delete=models.SET_NULL,
@@ -185,7 +163,7 @@ class Report(models.Model):
         help_text="County department responsible for this issue (auto-detected by AI)."
     )
 
-    # --- Priority Field ---
+    # Priority Field
     priority = models.CharField(
         max_length=20,
         choices=[
@@ -198,7 +176,7 @@ class Report(models.Model):
         help_text="Priority level of the report"
     )
 
-    # --- AI Verification ---
+    # AI Verification
     verified_by_ai = models.BooleanField(
         default=False,
         help_text="True if the AI verified this report automatically."
@@ -212,7 +190,7 @@ class Report(models.Model):
         help_text="True if required image evidence was provided."
     )
 
-    # --- Status Tracking ---
+    # Status Tracking
     status = models.CharField(
         max_length=20,
         choices=ReportStatusChoices.choices,
@@ -220,7 +198,7 @@ class Report(models.Model):
         help_text="Current state of this report in the workflow."
     )
 
-    # --- SOCIAL ENGAGEMENT FIELDS ---
+    # Social Engagement Fields
     likes = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name="liked_reports",
@@ -231,7 +209,7 @@ class Report(models.Model):
     comments_count = models.IntegerField(default=0)
     views_count = models.IntegerField(default=0)
 
-    # --- GOVERNMENT RESPONSE FIELDS ---
+    # Government Response Fields
     government_response = models.TextField(
         blank=True,
         null=True,
@@ -251,7 +229,7 @@ class Report(models.Model):
         help_text="Official who provided the response"
     )
 
-    # --- DEVELOPMENT SHOWCASE FIELDS ---
+    # Development Showcase Fields
     is_development_showcase = models.BooleanField(
         default=False,
         help_text="Mark as true if this report showcases government development work"
@@ -273,7 +251,7 @@ class Report(models.Model):
         help_text="Progress percentage (0-100)"
     )
 
-    # --- Metadata & Audit ---
+    # Metadata & Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -302,9 +280,6 @@ class Report(models.Model):
     def __str__(self):
         return f"{self.title} ({self.county.name})"
     
-    # ---------------------------------------------------------------------
-    #   Helper Methods
-    # ---------------------------------------------------------------------
     def get_public_reporter_name(self):
         """Get reporter name for public display (respects anonymity)"""
         if self.is_anonymous or self.hide_reporter_info:
@@ -326,16 +301,12 @@ class Report(models.Model):
     
     def can_view_reporter_details(self, user):
         """Check if user can view full reporter details"""
-        # Super admins and admins can always see details
         if user.is_superuser or user.is_admin:
             return True
-        # County officials can see details for reports in their county
         if user.is_county_official and user.county == self.county:
             return True
-        # Reporters can always see their own details
         if user == self.reporter:
             return True
-        # Everyone else gets anonymous view
         return False
 
     def soft_delete(self, user=None):
@@ -443,9 +414,6 @@ class Report(models.Model):
             raise ValidationError("Budget cannot be negative.")
 
 
-# ============================================================
-#   GOVERNMENT DEVELOPMENT MODEL
-# ============================================================
 class GovernmentDevelopment(models.Model):
     """
     Showcase government projects and developments separately from reports.
